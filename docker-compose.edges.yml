@@ -1,0 +1,31 @@
+services:
+  openems-edge-factory:
+    image: openems/edge:2026.1.0
+    hostname: openems-edge-factory
+    restart: unless-stopped
+    volumes:
+      - ./config/openems/edge-factory/config:/var/opt/openems/config:rw
+      - ./config/openems/edge-factory/data:/var/opt/openems/data:rw
+    ports:
+      - "127.0.0.1:8180:8080"
+      - "127.0.0.1:8185:8085"
+  openems-edge-charging-station-01:
+    image: openems/edge:2026.1.0
+    hostname: openems-edge-charging-station-01
+    restart: unless-stopped
+    volumes:
+      - ./config/openems/edge-charging-station-01/config:/var/opt/openems/config:rw
+      - ./config/openems/edge-charging-station-01/data:/var/opt/openems/data:rw
+    ports:
+      - "127.0.0.1:8280:8080"
+      - "127.0.0.1:8285:8085"
+  openems-edge-charging-station-02:
+    image: openems/edge:2026.1.0
+    hostname: openems-edge-charging-station-02
+    restart: unless-stopped
+    volumes:
+      - ./config/openems/edge-charging-station-02/config:/var/opt/openems/config:rw
+      - ./config/openems/edge-charging-station-02/data:/var/opt/openems/data:rw
+    ports:
+      - "127.0.0.1:8380:8080"
+      - "127.0.0.1:8385:8085"

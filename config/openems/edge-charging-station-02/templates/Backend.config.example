@@ -1,0 +1,7 @@
+service.pid="Controller.Api.Backend~ctrlBackend0"
+service.factoryPid="Controller.Api.Backend"
+id="ctrlBackend0"
+alias="Backend connection"
+enabled=B"true"
+uri="ws://openems-backend:8081"
+apikey="REPLACE_WITH_REGISTERED_EDGE_API_KEY"
