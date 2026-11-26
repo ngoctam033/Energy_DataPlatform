@@ -10,6 +10,13 @@ include:
     project_directory: ./citrineos-core
 
 services:
+  citrine-ui:
+    environment:
+      NEXT_PUBLIC_ADMIN_EMAIL: "admin@citrineos.com"
+      ADMIN_PASSWORD: "admin123"
+      NEXTAUTH_URL: "http://localhost:3000"
+      NEXTAUTH_SECRET: "citrineos-local-learning-secret-key"
+      
   openems-edge:
     image: openems/edge:${OPENEMS_TAG:-2026.1.0}
     restart: unless-stopped
@@ -134,6 +141,58 @@ services:
     ports:
       - "127.0.0.1:1880:1880"
 
+  # Continuous OCPP 1.6 traffic and automatic charging transactions.
+  # Opt in with: docker compose --profile sap up -d --build
+  sap-charging-simulator:
+    profiles: [sap]
+    build:
+      context: ./sap-charging-stations-simulator
+      dockerfile: docker/Dockerfile
+      args:
+        STACK_TRACE_LIMIT: 1024
+        MAX_OLD_SPACE_SIZE: 768
+    restart: unless-stopped
+    networks: [default]
+    depends_on:
+      citrine:
+        condition: service_healthy
+    volumes:
+      - ./config/sap-simulator/config.json:/usr/app/dist/assets/config.json:ro
+    ports:
+      - "127.0.0.1:8188:8080"
+    cpus: 2.0
+    mem_limit: 2g
+
+  # Load, reconnect, fault, V2G, and chaos scenarios for OCPP 1.6/2.0.1.
+  # Opt in with: docker compose --profile opencpo up -d --build
+  opencpo-charger-farm:
+    profiles: [opencpo]
+    build:
+      context: ./opencpo-charger-farm
+      dockerfile: Dockerfile
+    entrypoint: [python, -u, control.py]
+    restart: unless-stopped
+    networks: [default]
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8086"
+      OCPP16_URL: "${OPEN_CPO_OCPP16_URL:-ws://citrine:8081}"
+      OCPP201_URL: "${OPEN_CPO_OCPP201_URL:-ws://citrine:8081}"
+      CPO_API_URL: "${OPEN_CPO_API_URL:-}"
+      CPO_API_KEY: "${OPEN_CPO_API_KEY:-}"
+      DEMO_LOCATIONS: "${OPEN_CPO_DEMO_LOCATIONS:-false}"
+      DEMO_CITY: "${OPEN_CPO_DEMO_CITY:-}"
+      REDIS_HOST: "${OPEN_CPO_REDIS_HOST:-}"
+    depends_on:
+      citrine:
+        condition: service_healthy
+    volumes:
+      - opencpo-reports:/app/reports
+    ports:
+      - "127.0.0.1:8186:8086"
+    cpus: 2.0
+    mem_limit: 2g
+
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
@@ -166,3 +225,4 @@ volumes:
   influx-data:
   influx-config:
   grafana-data:
+  opencpo-reports:
