@@ -1,0 +1,42 @@
+{
+  "supervisionUrls": ["ws://citrine:8081"],
+  "supervisionUrlDistribution": "charging-station-affinity",
+  "log": {
+    "file": "/dev/stdout",
+    "errorFile": "/dev/stderr",
+    "console": false,
+    "rotate": false
+  },
+  "worker": {
+    "processType": "workerSet",
+    "elementsPerWorker": 1,
+    "poolMinSize": 1,
+    "poolMaxSize": 4
+  },
+  "uiServer": {
+    "enabled": true,
+    "options": {
+      "host": "::"
+    },
+    "accessPolicy": {
+      "allowedHosts": ["localhost", "127.0.0.1", "::1"],
+      "allowedOrigins": [],
+      "allowLoopbackProxy": false,
+      "requireTlsForNonLoopback": false,
+      "trustedProxies": []
+    },
+    "type": "ws",
+    "authentication": {
+      "enabled": true,
+      "type": "protocol-basic-auth",
+      "username": "admin",
+      "password": "admin"
+    }
+  },
+  "stationTemplateUrls": [
+    {
+      "file": "virtual-simple-atg.station-template.json",
+      "numberOfStations": 10
+    }
+  ]
+}

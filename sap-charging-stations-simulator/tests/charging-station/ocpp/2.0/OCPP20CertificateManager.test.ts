@@ -1,0 +1,647 @@
+/**
+ * @file Tests for OCPP20CertificateManager
+ * @description Unit tests for OCPP 2.0 certificate management and validation
+ */
+
+// First import by contract: project modules capture asset paths at module
+// load, so the bootstrap must set EVSE_ASSETS_DIR before any of them loads.
+import '../../../stubs/testEnvBootstrap.mjs'
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { mkdir, rm, symlink } from 'node:fs/promises'
+import { basename, join } from 'node:path'
+import { afterEach, beforeEach, describe, it } from 'node:test'
+
+import { OCPP20CertificateManager } from '../../../../src/charging-station/ocpp/2.0/OCPP20CertificateManager.js'
+import { resolveAssetsDir } from '../../../../src/resolveAssetsDir.js'
+import {
+  type CertificateHashDataType,
+  DeleteCertificateStatusEnumType,
+  HashAlgorithmEnumType,
+  InstallCertificateUseEnumType,
+} from '../../../../src/types/index.js'
+import { cleanupTempDirs, createTempDir, writeTempFile } from '../../../helpers/TempFiles.js'
+import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
+import { TEST_CHARGING_STATION_HASH_ID } from '../../ChargingStationTestConstants.js'
+import {
+  EMPTY_PEM_CERTIFICATE,
+  EXPIRED_X509_PEM_CERTIFICATE,
+  INVALID_PEM_CERTIFICATE_MISSING_MARKERS,
+  INVALID_PEM_WRONG_MARKERS,
+  VALID_PEM_CERTIFICATE_EXTENDED,
+  VALID_X509_CA_CERTIFICATE,
+  VALID_X509_LEAF_CERTIFICATE,
+  VALID_X509_PEM_CERTIFICATE,
+} from './OCPP20CertificateTestData.js'
+
+const TEST_CERT_TYPE = InstallCertificateUseEnumType.CSMSRootCertificate
+
+await describe('I02-I04 - ISO15118 Certificate Management', async () => {
+  afterEach(async () => {
+    await rm(join(resolveAssetsDir(), 'configurations', TEST_CHARGING_STATION_HASH_ID), {
+      force: true,
+      recursive: true,
+    })
+    await rm(join(resolveAssetsDir(), 'configurations', 'empty-station-hash-id'), {
+      force: true,
+      recursive: true,
+    })
+    await rm(join(resolveAssetsDir(), 'configurations', 'invalid-station-id'), {
+      force: true,
+      recursive: true,
+    })
+    standardCleanup()
+    cleanupTempDirs()
+  })
+
+  await describe('symlinked assets root', async () => {
+    for (const scenario of [
+      'missing configurations',
+      'existing configurations',
+      'escaping station',
+    ]) {
+      await it(`should handle ${scenario} through an assets alias`, async () => {
+        // Arrange
+        const fixtureDir = createTempDir('certificate-assets-alias-')
+        const assetsDir = join(fixtureDir, 'assets')
+        const aliasDir = join(fixtureDir, 'assets-alias')
+        const configurationsDir = join(assetsDir, 'configurations')
+        const outsideDir = join(fixtureDir, 'outside')
+        const stationLink = join(configurationsDir, 'escaping-station')
+        const configurationsExist = scenario !== 'missing configurations'
+        await mkdir(assetsDir)
+        if (configurationsExist) {
+          await mkdir(configurationsDir)
+        }
+        await symlink(assetsDir, aliasDir, 'junction')
+        if (scenario === 'escaping station') {
+          await mkdir(outsideDir)
+          await symlink(outsideDir, stationLink, 'junction')
+        }
+        const moduleUrl = (relativePath: string): string =>
+          JSON.stringify(new URL(relativePath, import.meta.url).href)
+        const script = writeTempFile(
+          fixtureDir,
+          'scenario.mjs',
+          `
+import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const configurationsDir = ${JSON.stringify(configurationsDir)}
+assert.strictEqual(existsSync(configurationsDir), ${String(configurationsExist)})
+// Dynamic imports let assertions observe filesystem state before module initialization.
+const { OCPP20CertificateManager } = await import(${moduleUrl('../../../../src/charging-station/ocpp/2.0/OCPP20CertificateManager.ts')})
+assert.strictEqual(existsSync(configurationsDir), ${String(configurationsExist)})
+const { resolveAssetsDir } = await import(${moduleUrl('../../../../src/resolveAssetsDir.ts')})
+const { DeleteCertificateStatusEnumType, GetCertificateIdUseEnumType, InstallCertificateUseEnumType } =
+  await import(${moduleUrl('../../../../src/types/index.ts')})
+const { VALID_X509_PEM_CERTIFICATE } = await import(${moduleUrl('./OCPP20CertificateTestData.ts')})
+assert.strictEqual(resolveAssetsDir(), ${JSON.stringify(aliasDir)})
+const manager = new OCPP20CertificateManager()
+const certificateType = InstallCertificateUseEnumType.CSMSRootCertificate
+const hashData = manager.computeCertificateHash(VALID_X509_PEM_CERTIFICATE)
+
+if (${JSON.stringify(scenario)} === 'escaping station') {
+  const outsideDir = ${JSON.stringify(outsideDir)}
+  const certDir = join(outsideDir, 'certs', certificateType)
+  await mkdir(certDir, { recursive: true })
+  const certPath = join(certDir, hashData.serialNumber.replace(/:/g, '-') + '.pem')
+  await writeFile(certPath, VALID_X509_PEM_CERTIFICATE)
+  const entriesBefore = await readdir(outsideDir, { recursive: true })
+  const result = await manager.storeCertificate(
+    'escaping-station', certificateType, VALID_X509_PEM_CERTIFICATE, 'test |'
+  )
+  assert.strictEqual(result.success, false)
+  assert.match(result.error, /Path traversal attempt detected/)
+  assert.deepStrictEqual(await manager.getInstalledCertificates('escaping-station'), {
+    certificateHashDataChain: [],
+  })
+  assert.deepStrictEqual(await manager.deleteCertificate('escaping-station', hashData), {
+    status: DeleteCertificateStatusEnumType.Failed,
+  })
+  assert.strictEqual(await readFile(certPath, 'utf8'), VALID_X509_PEM_CERTIFICATE)
+  assert.deepStrictEqual(await readdir(outsideDir, { recursive: true }), entriesBefore)
+} else {
+  for (const station of ['first-fresh-station', 'second-fresh-station']) {
+    assert.strictEqual(existsSync(join(configurationsDir, station)), false)
+    const result = await manager.storeCertificate(
+      station, certificateType, VALID_X509_PEM_CERTIFICATE, 'test |'
+    )
+    assert.strictEqual(result.success, true, result.error)
+    assert.strictEqual(typeof result.filePath, 'string')
+    assert.strictEqual(await readFile(result.filePath, 'utf8'), VALID_X509_PEM_CERTIFICATE)
+    assert.strictEqual(existsSync(configurationsDir), true)
+    assert.deepStrictEqual(await manager.getInstalledCertificates(station), {
+      certificateHashDataChain: [{
+        certificateHashData: hashData,
+        certificateType: GetCertificateIdUseEnumType.CSMSRootCertificate,
+      }],
+    })
+    assert.deepStrictEqual(await manager.deleteCertificate(station, hashData), {
+      status: DeleteCertificateStatusEnumType.Accepted,
+    })
+    assert.strictEqual(existsSync(result.filePath), false)
+    assert.deepStrictEqual(await manager.getInstalledCertificates(station), {
+      certificateHashDataChain: [],
+    })
+    assert.deepStrictEqual(await manager.deleteCertificate(station, hashData), {
+      status: DeleteCertificateStatusEnumType.NotFound,
+    })
+  }
+}
+`
+        )
+
+        // Act
+        try {
+          const child = spawn(process.execPath, ['--import', 'tsx', script], {
+            env: { ...process.env, EVSE_ASSETS_DIR: aliasDir, NODE_ENV: 'test' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 120_000,
+          })
+          let diagnostics = ''
+          child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+            diagnostics += chunk
+          })
+          child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+            diagnostics += chunk
+          })
+          const { promise, reject, resolve } = Promise.withResolvers<null | number>()
+          child.once('error', reject)
+          child.once('close', resolve)
+          const exitCode = await promise
+
+          // Assert
+          assert.strictEqual(exitCode, 0, diagnostics)
+        } finally {
+          if (scenario === 'escaping station') {
+            await rm(stationLink, { force: true })
+          }
+          await rm(aliasDir, { force: true })
+        }
+      })
+    }
+  })
+
+  await describe('storeCertificate', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+
+    await it('should store a valid PEM certificate to the correct path', async () => {
+      const result = await manager.storeCertificate(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        VALID_PEM_CERTIFICATE_EXTENDED,
+        'test |'
+      )
+
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result.success, true)
+      if (result.filePath == null) {
+        assert.fail('Expected filePath to be defined')
+      }
+      assert.ok(result.filePath.includes(TEST_CHARGING_STATION_HASH_ID))
+      assert.ok(result.filePath.includes('certs'))
+      assert.match(result.filePath, /\.pem$/)
+    })
+
+    await it('should reject invalid PEM certificate without BEGIN/END markers', async () => {
+      const result = await manager.storeCertificate(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        INVALID_PEM_CERTIFICATE_MISSING_MARKERS,
+        'test |'
+      )
+
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result.success, false)
+      if (result.error == null) {
+        assert.fail('Expected error to be defined')
+      }
+      assert.ok(result.error.includes('Invalid PEM format'))
+    })
+
+    await it('should reject empty certificate data', async () => {
+      const result = await manager.storeCertificate(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        EMPTY_PEM_CERTIFICATE,
+        'test |'
+      )
+
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result.success, false)
+      assert.notStrictEqual(result.error, undefined)
+    })
+
+    await it('should create certificate directory structure if not exists', async () => {
+      const result = await manager.storeCertificate(
+        TEST_CHARGING_STATION_HASH_ID,
+        InstallCertificateUseEnumType.V2GRootCertificate,
+        VALID_PEM_CERTIFICATE_EXTENDED,
+        'test |'
+      )
+
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result.success, true)
+      if (result.filePath == null) {
+        assert.fail('Expected filePath to be defined')
+      }
+      assert.ok(result.filePath.includes('V2GRootCertificate'))
+    })
+  })
+
+  await describe('deleteCertificate', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+    await it('should delete certificate by hash data', async () => {
+      const hashData: CertificateHashDataType = {
+        hashAlgorithm: HashAlgorithmEnumType.SHA256,
+        issuerKeyHash: 'abc123def456',
+        issuerNameHash: 'xyz789abc012',
+        serialNumber: 'SN-12345',
+      }
+
+      const result = await manager.deleteCertificate(TEST_CHARGING_STATION_HASH_ID, hashData)
+
+      assert.notStrictEqual(result, undefined)
+      assert.notStrictEqual(result.status, undefined)
+      assert.ok(
+        [
+          DeleteCertificateStatusEnumType.Accepted,
+          DeleteCertificateStatusEnumType.Failed,
+          DeleteCertificateStatusEnumType.NotFound,
+        ].includes(result.status)
+      )
+    })
+
+    await it('should return NotFound for non-existent certificate', async () => {
+      const hashData: CertificateHashDataType = {
+        hashAlgorithm: HashAlgorithmEnumType.SHA256,
+        issuerKeyHash: 'non-existent-hash',
+        issuerNameHash: 'non-existent-hash',
+        serialNumber: 'NON-EXISTENT-SN',
+      }
+
+      const result = await manager.deleteCertificate(TEST_CHARGING_STATION_HASH_ID, hashData)
+
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result.status, DeleteCertificateStatusEnumType.NotFound)
+    })
+
+    await it('should handle filesystem errors gracefully', async () => {
+      const hashData: CertificateHashDataType = {
+        hashAlgorithm: HashAlgorithmEnumType.SHA256,
+        issuerKeyHash: 'valid-hash',
+        issuerNameHash: 'valid-hash',
+        serialNumber: 'VALID-SN',
+      }
+
+      const result = await manager.deleteCertificate('invalid-station-id', hashData)
+
+      assert.notStrictEqual(result, undefined)
+      assert.ok(
+        [DeleteCertificateStatusEnumType.Failed, DeleteCertificateStatusEnumType.NotFound].includes(
+          result.status
+        )
+      )
+    })
+  })
+
+  await describe('getInstalledCertificates', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+    await it('should return list of installed certificates for station', async () => {
+      const result = await manager.getInstalledCertificates(TEST_CHARGING_STATION_HASH_ID)
+
+      assert.notStrictEqual(result, undefined)
+      assert.ok(Array.isArray(result.certificateHashDataChain))
+    })
+
+    await it('should filter certificates by type when filter provided', async () => {
+      const filterTypes = [InstallCertificateUseEnumType.CSMSRootCertificate]
+      const result = await manager.getInstalledCertificates(
+        TEST_CHARGING_STATION_HASH_ID,
+        filterTypes
+      )
+
+      assert.notStrictEqual(result, undefined)
+      assert.ok(Array.isArray(result.certificateHashDataChain))
+    })
+
+    await it('should return empty list when no certificates installed', async () => {
+      const result = await manager.getInstalledCertificates('empty-station-hash-id')
+
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result.certificateHashDataChain.length, 0)
+    })
+
+    await it('should support multiple certificate type filters', async () => {
+      const filterTypes = [
+        InstallCertificateUseEnumType.CSMSRootCertificate,
+        InstallCertificateUseEnumType.V2GRootCertificate,
+        InstallCertificateUseEnumType.ManufacturerRootCertificate,
+      ]
+      const result = await manager.getInstalledCertificates(
+        TEST_CHARGING_STATION_HASH_ID,
+        filterTypes
+      )
+
+      assert.notStrictEqual(result, undefined)
+      assert.ok(Array.isArray(result.certificateHashDataChain))
+    })
+  })
+
+  await describe('computeCertificateHash', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+    await it('should compute hash data for valid PEM certificate', () => {
+      const hashData = manager.computeCertificateHash(VALID_PEM_CERTIFICATE_EXTENDED)
+
+      assert.notStrictEqual(hashData, undefined)
+      assert.strictEqual(hashData.hashAlgorithm, HashAlgorithmEnumType.SHA256)
+      assert.notStrictEqual(hashData.issuerNameHash, undefined)
+      assert.strictEqual(typeof hashData.issuerNameHash, 'string')
+      assert.notStrictEqual(hashData.issuerKeyHash, undefined)
+      assert.strictEqual(typeof hashData.issuerKeyHash, 'string')
+      assert.notStrictEqual(hashData.serialNumber, undefined)
+      assert.strictEqual(typeof hashData.serialNumber, 'string')
+    })
+
+    await it('should return hex-encoded hash values', () => {
+      const hashData = manager.computeCertificateHash(VALID_PEM_CERTIFICATE_EXTENDED)
+
+      const hexPattern = /^[a-fA-F0-9]+$/
+      assert.match(hashData.issuerNameHash, hexPattern)
+      assert.match(hashData.issuerKeyHash, hexPattern)
+    })
+
+    await it('should throw error for invalid PEM certificate', () => {
+      assert.throws(() => {
+        manager.computeCertificateHash(INVALID_PEM_CERTIFICATE_MISSING_MARKERS)
+      })
+    })
+
+    await it('should throw error for empty certificate', () => {
+      assert.throws(() => {
+        manager.computeCertificateHash(EMPTY_PEM_CERTIFICATE)
+      })
+    })
+
+    await it('should support SHA384 hash algorithm', () => {
+      const hashData = manager.computeCertificateHash(
+        VALID_PEM_CERTIFICATE_EXTENDED,
+        HashAlgorithmEnumType.SHA384
+      )
+
+      assert.notStrictEqual(hashData, undefined)
+      assert.strictEqual(hashData.hashAlgorithm, HashAlgorithmEnumType.SHA384)
+    })
+
+    await it('should support SHA512 hash algorithm', () => {
+      const hashData = manager.computeCertificateHash(
+        VALID_PEM_CERTIFICATE_EXTENDED,
+        HashAlgorithmEnumType.SHA512
+      )
+
+      assert.notStrictEqual(hashData, undefined)
+      assert.strictEqual(hashData.hashAlgorithm, HashAlgorithmEnumType.SHA512)
+    })
+  })
+
+  await describe('validateCertificateFormat', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+    await it('should return true for valid PEM certificate', () => {
+      const isValid = manager.validateCertificateFormat(VALID_PEM_CERTIFICATE_EXTENDED)
+
+      assert.strictEqual(isValid, true)
+    })
+
+    await it('should return false for certificate without BEGIN marker', () => {
+      const isValid = manager.validateCertificateFormat(INVALID_PEM_CERTIFICATE_MISSING_MARKERS)
+
+      assert.strictEqual(isValid, false)
+    })
+
+    await it('should return false for certificate with wrong markers', () => {
+      const isValid = manager.validateCertificateFormat(INVALID_PEM_WRONG_MARKERS)
+
+      assert.strictEqual(isValid, false)
+    })
+
+    await it('should return false for empty string', () => {
+      const isValid = manager.validateCertificateFormat(EMPTY_PEM_CERTIFICATE)
+
+      assert.strictEqual(isValid, false)
+    })
+
+    await it('should return false for null/undefined input', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- testing invalid null input
+      assert.strictEqual(manager.validateCertificateFormat(null as any), false)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- testing invalid undefined input
+      assert.strictEqual(manager.validateCertificateFormat(undefined as any), false)
+    })
+
+    await it('should return true for certificate with extra whitespace', () => {
+      const pemWithWhitespace = `
+        
+        -----BEGIN CERTIFICATE-----
+        MIIDXTCCAkWgAwIBAgIJAJC1HiIAZAiUMA0GCSqGSIb3Qq8teleNzMHjvLuHvVsY
+        -----END CERTIFICATE-----
+        
+      `
+
+      const isValid = manager.validateCertificateFormat(pemWithWhitespace)
+
+      assert.strictEqual(isValid, true)
+    })
+  })
+
+  await describe('getCertificatePath', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+    await it('should return correct file path for certificate', async () => {
+      const path = await manager.getCertificatePath(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        'SERIAL-12345'
+      )
+
+      assert.notStrictEqual(path, undefined)
+      assert.ok(path.includes(TEST_CHARGING_STATION_HASH_ID))
+      assert.ok(path.includes('certs'))
+      assert.ok(path.includes('CSMSRootCertificate'))
+      assert.ok(path.includes('SERIAL-12345'))
+      assert.match(path, /\.pem$/)
+    })
+
+    await it('should handle special characters in serial number', async () => {
+      const path = await manager.getCertificatePath(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        'SERIAL:ABC/123'
+      )
+
+      assert.notStrictEqual(path, undefined)
+      const filename = basename(path)
+      assert.ok(!filename.includes(':'))
+      assert.ok(!filename.includes('/'))
+    })
+
+    await it('should return different paths for different certificate types', async () => {
+      const csmsPath = await manager.getCertificatePath(
+        TEST_CHARGING_STATION_HASH_ID,
+        InstallCertificateUseEnumType.CSMSRootCertificate,
+        'SERIAL-001'
+      )
+
+      const v2gPath = await manager.getCertificatePath(
+        TEST_CHARGING_STATION_HASH_ID,
+        InstallCertificateUseEnumType.V2GRootCertificate,
+        'SERIAL-001'
+      )
+
+      assert.notStrictEqual(csmsPath, v2gPath)
+      assert.ok(csmsPath.includes('CSMSRootCertificate'))
+      assert.ok(v2gPath.includes('V2GRootCertificate'))
+    })
+
+    await it('should return path following project convention', async () => {
+      const path = await manager.getCertificatePath(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        'SERIAL-12345'
+      )
+
+      assert.match(path, /configurations/)
+      assert.match(path, /certs/)
+      assert.match(path, /\.pem$/)
+    })
+  })
+
+  await describe('Edge cases and error handling', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+    await it('should handle concurrent certificate operations', async () => {
+      const results = await Promise.all([
+        manager.storeCertificate(
+          TEST_CHARGING_STATION_HASH_ID,
+          InstallCertificateUseEnumType.CSMSRootCertificate,
+          VALID_PEM_CERTIFICATE_EXTENDED,
+          'test |'
+        ),
+        manager.storeCertificate(
+          TEST_CHARGING_STATION_HASH_ID,
+          InstallCertificateUseEnumType.V2GRootCertificate,
+          VALID_PEM_CERTIFICATE_EXTENDED,
+          'test |'
+        ),
+        manager.getInstalledCertificates(TEST_CHARGING_STATION_HASH_ID),
+      ])
+
+      assert.strictEqual(results.length, 3)
+      results.forEach(result => {
+        assert.notStrictEqual(result, undefined)
+      })
+    })
+
+    await it('should handle very long certificate chains', async () => {
+      const longChain = Array(5).fill(VALID_PEM_CERTIFICATE_EXTENDED).join('\n')
+
+      const result = await manager.storeCertificate(
+        TEST_CHARGING_STATION_HASH_ID,
+        TEST_CERT_TYPE,
+        longChain,
+        'test |'
+      )
+
+      assert.notStrictEqual(result, undefined)
+    })
+
+    await it('should sanitize station hash ID for filesystem safety', async () => {
+      const maliciousHashId = '../../../etc/passwd'
+
+      const path = await manager.getCertificatePath(maliciousHashId, TEST_CERT_TYPE, 'SERIAL-001')
+
+      assert.ok(!path.includes('..'))
+    })
+  })
+
+  await describe('validateCertificateX509', async () => {
+    let manager: OCPP20CertificateManager
+
+    beforeEach(() => {
+      manager = new OCPP20CertificateManager()
+    })
+
+    await it('should return valid for a real X.509 certificate within validity period', () => {
+      const result = manager.validateCertificateX509(VALID_X509_PEM_CERTIFICATE)
+
+      assert.strictEqual(result.valid, true)
+      assert.strictEqual(result.reason, undefined)
+    })
+
+    await it('should return invalid with reason for an expired X.509 certificate', () => {
+      const result = manager.validateCertificateX509(EXPIRED_X509_PEM_CERTIFICATE)
+
+      assert.strictEqual(result.valid, false)
+      assert.strictEqual(typeof result.reason, 'string')
+      assert.ok(result.reason?.includes('expired'))
+    })
+
+    await it('should return invalid with reason for non-PEM data', () => {
+      const result = manager.validateCertificateX509('not-a-certificate')
+
+      assert.strictEqual(result.valid, false)
+      assert.strictEqual(typeof result.reason, 'string')
+      assert.ok(result.reason?.includes('No PEM certificate found'))
+    })
+
+    await it('should return valid for a chain where leaf is signed by CA', () => {
+      const chain = `${VALID_X509_LEAF_CERTIFICATE}\n${VALID_X509_CA_CERTIFICATE}`
+      const result = manager.validateCertificateX509(chain)
+
+      assert.strictEqual(result.valid, true)
+    })
+
+    await it('should return invalid when chain has issuer mismatch', () => {
+      const brokenChain = `${VALID_X509_LEAF_CERTIFICATE}\n${VALID_X509_PEM_CERTIFICATE}`
+      const result = manager.validateCertificateX509(brokenChain)
+
+      assert.strictEqual(result.valid, false)
+      assert.match(result.reason ?? '', /issuer mismatch|signature verification failed/)
+    })
+
+    await it('should return invalid when chain has expired intermediate', () => {
+      const chainWithExpired = `${VALID_X509_PEM_CERTIFICATE}\n${EXPIRED_X509_PEM_CERTIFICATE}`
+      const result = manager.validateCertificateX509(chainWithExpired)
+
+      assert.strictEqual(result.valid, false)
+      assert.ok(result.reason?.includes('expired'))
+    })
+  })
+})

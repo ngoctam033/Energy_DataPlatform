@@ -1,0 +1,207 @@
+import { createPublicKey } from 'node:crypto'
+
+import { BaseError } from '../../exception/index.js'
+import {
+  type ConnectorStatus,
+  OCPP16MeterValueFormat,
+  type OCPP16SampledValue,
+  PublicKeyWithSignedMeterValueEnumType,
+  type SampledValue,
+  SigningMethodEnumType,
+} from '../../types/index.js'
+import { getEnumStringValue } from '../../utils/index.js'
+import { getErrorMessage, isJsonObject, isNotEmptyString, logger } from '../../utils/index.js'
+
+export const getOCPP16SignedMeterValuePublicKey = (
+  sampledValue: OCPP16SampledValue
+): string | undefined => {
+  if (sampledValue.format !== OCPP16MeterValueFormat.SIGNED_DATA) return undefined
+  try {
+    const signedMeterValue: unknown = JSON.parse(sampledValue.value)
+    return isJsonObject(signedMeterValue) && typeof signedMeterValue.publicKey === 'string'
+      ? signedMeterValue.publicKey
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export interface PublicKeyDeliveryToken {
+  readonly carrier: object
+  readonly connectorStatus: ConnectorStatus
+  readonly transactionId: string
+}
+
+const publicKeyDeliveryOwners = new WeakMap<ConnectorStatus, PublicKeyDeliveryToken>()
+
+export const claimPublicKeyDelivery = (
+  connectorStatus: ConnectorStatus,
+  transactionId: number | string,
+  carrier: object,
+  carriesPublicKey: boolean
+): PublicKeyDeliveryToken | undefined => {
+  const normalizedTransactionId = transactionId.toString()
+  if (!carriesPublicKey || connectorStatus.transactionId?.toString() !== normalizedTransactionId) {
+    return undefined
+  }
+  const token = {
+    carrier,
+    connectorStatus,
+    transactionId: normalizedTransactionId,
+  }
+  publicKeyDeliveryOwners.set(connectorStatus, token)
+  connectorStatus.publicKeySentInTransaction = true
+  return token
+}
+
+export const retainPublicKeyDelivery = (token: PublicKeyDeliveryToken | undefined): void => {
+  if (token == null || publicKeyDeliveryOwners.get(token.connectorStatus) !== token) return
+  publicKeyDeliveryOwners.delete(token.connectorStatus)
+}
+
+export const releasePublicKeyDelivery = (token: PublicKeyDeliveryToken | undefined): boolean => {
+  if (token == null || publicKeyDeliveryOwners.get(token.connectorStatus) !== token) return false
+  publicKeyDeliveryOwners.delete(token.connectorStatus)
+  if (token.connectorStatus.transactionId?.toString() !== token.transactionId) return false
+  token.connectorStatus.publicKeySentInTransaction = false
+  return true
+}
+
+export const transferPublicKeyDelivery = (
+  token: PublicKeyDeliveryToken | undefined,
+  carrier: object
+): PublicKeyDeliveryToken | undefined => {
+  if (
+    token == null ||
+    publicKeyDeliveryOwners.get(token.connectorStatus) !== token ||
+    token.connectorStatus.transactionId?.toString() !== token.transactionId
+  ) {
+    return undefined
+  }
+  const replacement = { ...token, carrier }
+  publicKeyDeliveryOwners.set(token.connectorStatus, replacement)
+  token.connectorStatus.publicKeySentInTransaction = true
+  return replacement
+}
+
+export interface SampledValueSigningConfig extends SigningConfig {
+  enabled: boolean
+  publicKeySentInTransaction: boolean
+  timestamp?: Date
+  transactionId: number | string
+}
+
+export interface SignedSampledValueResult<T extends SampledValue = SampledValue> {
+  publicKeyIncluded: boolean
+  sampledValue: T
+}
+
+export interface SigningConfig {
+  meterSerialNumber: string
+  publicKeyHex?: string
+  publicKeyWithSignedMeterValue: PublicKeyWithSignedMeterValueEnumType
+  signingMethod?: SigningMethodEnumType
+}
+
+const NODE_CURVE_TO_SIGNING_METHOD = new Map<string, SigningMethodEnumType>([
+  ['brainpoolP256r1', SigningMethodEnumType.ECDSA_brainpool256r1_SHA256],
+  ['brainpoolP384r1', SigningMethodEnumType.ECDSA_brainpool384r1_SHA256],
+  ['prime192v1', SigningMethodEnumType.ECDSA_secp192r1_SHA256],
+  ['prime256v1', SigningMethodEnumType.ECDSA_secp256r1_SHA256],
+  ['secp192k1', SigningMethodEnumType.ECDSA_secp192k1_SHA256],
+  ['secp256k1', SigningMethodEnumType.ECDSA_secp256k1_SHA256],
+  ['secp384r1', SigningMethodEnumType.ECDSA_secp384r1_SHA256],
+])
+
+export const deriveSigningMethodFromPublicKeyHex = (
+  publicKeyHex: string
+): SigningMethodEnumType | undefined => {
+  try {
+    const key = createPublicKey({
+      format: 'der',
+      key: Buffer.from(publicKeyHex, 'hex'),
+      type: 'spki',
+    })
+    if (key.asymmetricKeyType !== 'ec') {
+      return undefined
+    }
+    const namedCurve = key.asymmetricKeyDetails?.namedCurve
+    return namedCurve != null ? NODE_CURVE_TO_SIGNING_METHOD.get(namedCurve) : undefined
+  } catch (error) {
+    logger.debug(
+      `deriveSigningMethodFromPublicKeyHex: failed to parse public key: ${getErrorMessage(error)}`
+    )
+    return undefined
+  }
+}
+
+export interface SigningPrerequisiteResult {
+  enabled: false
+  reason: string
+}
+
+export interface SigningPrerequisiteSuccess {
+  enabled: true
+  signingMethod: SigningMethodEnumType
+}
+
+export const validateSigningPrerequisites = (
+  publicKeyHex: string | undefined,
+  configuredSigningMethod: string | undefined
+): SigningPrerequisiteResult | SigningPrerequisiteSuccess => {
+  const signingMethod = getEnumStringValue(SigningMethodEnumType, configuredSigningMethod)
+  if (configuredSigningMethod !== undefined && signingMethod == null) {
+    return {
+      enabled: false,
+      reason: `SigningMethod '${configuredSigningMethod}' is invalid`,
+    }
+  }
+
+  if (!isNotEmptyString(publicKeyHex)) {
+    return { enabled: false, reason: 'Public key is not configured' }
+  }
+
+  const derivedMethod = deriveSigningMethodFromPublicKeyHex(publicKeyHex)
+
+  if (derivedMethod == null) {
+    return {
+      enabled: false,
+      reason: 'Cannot derive EC curve from public key hex — unsupported or malformed ASN.1 key',
+    }
+  }
+
+  if (signingMethod != null && signingMethod !== derivedMethod) {
+    return {
+      enabled: false,
+      reason:
+        `SigningMethod mismatch: configured '${signingMethod}' ` +
+        `but public key uses '${derivedMethod}'`,
+    }
+  }
+
+  return { enabled: true, signingMethod: signingMethod ?? derivedMethod }
+}
+
+export const parsePublicKeyWithSignedMeterValue = (
+  value: string | undefined
+): PublicKeyWithSignedMeterValueEnumType =>
+  getEnumStringValue(PublicKeyWithSignedMeterValueEnumType, value) ??
+  PublicKeyWithSignedMeterValueEnumType.Never
+
+export const shouldIncludePublicKey = (
+  config: PublicKeyWithSignedMeterValueEnumType,
+  publicKeySentInTransaction: boolean
+): boolean => {
+  switch (config) {
+    case PublicKeyWithSignedMeterValueEnumType.EveryMeterValue:
+      return true
+    case PublicKeyWithSignedMeterValueEnumType.Never:
+      return false
+    case PublicKeyWithSignedMeterValueEnumType.OncePerTransaction:
+      return !publicKeySentInTransaction
+    default:
+      throw new BaseError(
+        `Unsupported PublicKeyWithSignedMeterValueEnumType value: ${String(config)}`
+      )
+  }
+}

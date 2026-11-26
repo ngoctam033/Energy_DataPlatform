@@ -1,0 +1,930 @@
+import { secondsToMilliseconds } from 'date-fns'
+
+import type { ChargingStation } from '../ChargingStation.js'
+
+import { BaseError, OCPPError } from '../../exception/index.js'
+import {
+  AuthorizationStatus,
+  type AuthorizeResponse,
+  type BootNotificationRequest,
+  type BootNotificationResponse,
+  BroadcastChannelProcedureName,
+  type BroadcastChannelRequest,
+  type BroadcastChannelRequestPayload,
+  type BroadcastChannelResponsePayload,
+  type ChangeConfigurationResponse,
+  ConfigurationStatus,
+  type DataTransferResponse,
+  DataTransferStatus,
+  GenericStatus,
+  GetCertificateStatusEnumType,
+  type HeartbeatResponse,
+  Iso15118EVCertificateStatusEnumType,
+  isOCPP16MeterValue,
+  isOCPP20MeterValue,
+  type MessageEvent,
+  type MeterValuesRequest,
+  type MeterValuesResponse,
+  type OCPP16AuthorizeResponse,
+  type OCPP16MeterValue,
+  OCPP20AuthorizationStatusEnumType,
+  type OCPP20AuthorizeResponse,
+  OCPP20ComponentName,
+  type OCPP20Get15118EVCertificateResponse,
+  type OCPP20GetCertificateStatusResponse,
+  type OCPP20MeterValue,
+  OCPP20ReadingContextEnumType,
+  OCPP20RequiredVariableName,
+  type OCPP20SignCertificateResponse,
+  type OCPP20TransactionEventResponse,
+  OCPPVersion,
+  RegistrationStatusEnumType,
+  RequestCommand,
+  type RequestParams,
+  ResponseStatus,
+  StandardParametersKey,
+  type StartTransactionResponse,
+  type StatusNotificationOptions,
+  type StopTransactionRequest,
+  type StopTransactionResponse,
+} from '../../types/index.js'
+import {
+  Constants,
+  convertToInt,
+  getEnumStringValue,
+  getErrorMessage,
+  isAsyncFunction,
+  isEmpty,
+  isNotEmptyString,
+  isOCPP20x,
+  logger,
+} from '../../utils/index.js'
+import { buildConfigKey, getConfigurationKey } from '../ConfigurationKeyUtils.js'
+import {
+  captureTransactionIntervalState,
+  completeTransactionIntervalState,
+  restoreTransactionIntervalState,
+  type TransactionMeterValueDelivery,
+  TransactionMeterValueDeliveryBarrier,
+} from '../meter-values/index.js'
+import {
+  buildMeterValue,
+  claimPublicKeyDelivery,
+  getOCPP16SignedMeterValuePublicKey,
+  OCPP16ServiceUtils,
+  OCPP20ServiceUtils,
+  releasePublicKeyDelivery,
+  retainPublicKeyDelivery,
+  sendAndSetConnectorStatus,
+} from '../ocpp/index.js'
+import { getRawSignedMeterValuePublicKey } from '../TransactionEventQueueUtils.js'
+import { WorkerBroadcastChannel } from './WorkerBroadcastChannel.js'
+
+const moduleName = 'ChargingStationWorkerBroadcastChannel'
+
+type CommandHandler = (
+  requestPayload?: BroadcastChannelRequestPayload
+  // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- broadcast-channel command handlers may legitimately return no payload
+) => CommandResponse | Promise<CommandResponse | void> | void
+
+type CommandResponse =
+  | AuthorizeResponse
+  | BootNotificationResponse
+  | ChangeConfigurationResponse
+  | DataTransferResponse
+  | HeartbeatResponse
+  | OCPP20Get15118EVCertificateResponse
+  | OCPP20GetCertificateStatusResponse
+  | OCPP20SignCertificateResponse
+  | OCPP20TransactionEventResponse
+  | StartTransactionResponse
+  | StopTransactionResponse
+
+export class ChargingStationWorkerBroadcastChannel extends WorkerBroadcastChannel {
+  private static readonly acceptedStatusCommands = new Map<
+    BroadcastChannelProcedureName,
+    (response: CommandResponse) => boolean
+  >([
+    [
+      BroadcastChannelProcedureName.BOOT_NOTIFICATION,
+      r => r.status === RegistrationStatusEnumType.ACCEPTED,
+    ],
+    [
+      BroadcastChannelProcedureName.CHANGE_CONFIGURATION,
+      r =>
+        r.status === ConfigurationStatus.ACCEPTED ||
+        r.status === ConfigurationStatus.REBOOT_REQUIRED,
+    ],
+    [BroadcastChannelProcedureName.DATA_TRANSFER, r => r.status === DataTransferStatus.ACCEPTED],
+    [
+      BroadcastChannelProcedureName.GET_15118_EV_CERTIFICATE,
+      r =>
+        getEnumStringValue(Iso15118EVCertificateStatusEnumType, r.status) ===
+        Iso15118EVCertificateStatusEnumType.Accepted,
+    ],
+    [
+      BroadcastChannelProcedureName.GET_CERTIFICATE_STATUS,
+      r =>
+        getEnumStringValue(GetCertificateStatusEnumType, r.status) ===
+        GetCertificateStatusEnumType.Accepted,
+    ],
+    [
+      BroadcastChannelProcedureName.SIGN_CERTIFICATE,
+      r => getEnumStringValue(GenericStatus, r.status) === GenericStatus.Accepted,
+    ],
+  ])
+
+  private static readonly emptyResponseCommands = new Set<BroadcastChannelProcedureName>([
+    BroadcastChannelProcedureName.LOG_STATUS_NOTIFICATION,
+    BroadcastChannelProcedureName.METER_VALUES,
+    BroadcastChannelProcedureName.NOTIFY_CUSTOMER_INFORMATION,
+    BroadcastChannelProcedureName.NOTIFY_REPORT,
+    BroadcastChannelProcedureName.SECURITY_EVENT_NOTIFICATION,
+    BroadcastChannelProcedureName.STATUS_NOTIFICATION,
+  ])
+
+  private readonly chargingStation: ChargingStation
+
+  private readonly commandHandlers: Map<BroadcastChannelProcedureName, CommandHandler>
+
+  private readonly requestParams: RequestParams = {
+    throwError: true,
+  }
+
+  constructor (chargingStation: ChargingStation) {
+    super()
+    this.chargingStation = chargingStation
+    this.commandHandlers = new Map<BroadcastChannelProcedureName, CommandHandler>([
+      [BroadcastChannelProcedureName.AUTHORIZE, this.passthrough(RequestCommand.AUTHORIZE)],
+      [BroadcastChannelProcedureName.BOOT_NOTIFICATION, this.handleBootNotification.bind(this)],
+      [
+        BroadcastChannelProcedureName.CHANGE_CONFIGURATION,
+        (requestPayload?: BroadcastChannelRequestPayload): ChangeConfigurationResponse => {
+          const key = requestPayload?.key
+          if (!isNotEmptyString(key)) {
+            throw new BaseError(
+              `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'key' field is required`
+            )
+          }
+          const value = requestPayload?.value
+          if (typeof value !== 'string') {
+            throw new BaseError(
+              `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'value' field must be a string`
+            )
+          }
+          return { status: this.chargingStation.changeConfiguration(key, value) }
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.CLOSE_CONNECTION,
+        () => {
+          // Requested disconnect (UI action): terminal, must not auto-reconnect.
+          this.chargingStation.closeWSConnection({ byRequest: true })
+        },
+      ],
+      [BroadcastChannelProcedureName.DATA_TRANSFER, this.passthrough(RequestCommand.DATA_TRANSFER)],
+      [
+        BroadcastChannelProcedureName.DELETE_CHARGING_STATIONS,
+        async (requestPayload?: BroadcastChannelRequestPayload) => {
+          await this.chargingStation.delete(requestPayload?.deleteConfiguration as boolean)
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.DIAGNOSTICS_STATUS_NOTIFICATION,
+        this.passthrough(RequestCommand.DIAGNOSTICS_STATUS_NOTIFICATION),
+      ],
+      [
+        BroadcastChannelProcedureName.FIRMWARE_STATUS_NOTIFICATION,
+        this.passthrough(RequestCommand.FIRMWARE_STATUS_NOTIFICATION),
+      ],
+      [
+        BroadcastChannelProcedureName.GET_15118_EV_CERTIFICATE,
+        this.passthrough(RequestCommand.GET_15118_EV_CERTIFICATE),
+      ],
+      [
+        BroadcastChannelProcedureName.GET_CERTIFICATE_STATUS,
+        this.passthrough(RequestCommand.GET_CERTIFICATE_STATUS),
+      ],
+      [BroadcastChannelProcedureName.HEARTBEAT, this.passthrough(RequestCommand.HEARTBEAT)],
+      [
+        BroadcastChannelProcedureName.LOCK_CONNECTOR,
+        (requestPayload?: BroadcastChannelRequestPayload) => {
+          if (requestPayload?.connectorId == null) {
+            throw new BaseError(
+              `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'connectorId' field is required`
+            )
+          }
+          this.chargingStation.lockConnector(requestPayload.connectorId)
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.LOG_STATUS_NOTIFICATION,
+        this.passthrough(RequestCommand.LOG_STATUS_NOTIFICATION),
+      ],
+      [BroadcastChannelProcedureName.METER_VALUES, this.handleMeterValues.bind(this)],
+      [
+        BroadcastChannelProcedureName.NOTIFY_CUSTOMER_INFORMATION,
+        this.passthrough(RequestCommand.NOTIFY_CUSTOMER_INFORMATION),
+      ],
+      [BroadcastChannelProcedureName.NOTIFY_REPORT, this.passthrough(RequestCommand.NOTIFY_REPORT)],
+      [
+        BroadcastChannelProcedureName.OPEN_CONNECTION,
+        () => {
+          this.chargingStation.openWSConnection()
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.SECURITY_EVENT_NOTIFICATION,
+        this.passthrough(RequestCommand.SECURITY_EVENT_NOTIFICATION),
+      ],
+      [
+        BroadcastChannelProcedureName.SET_SUPERVISION_URL,
+        (requestPayload?: BroadcastChannelRequestPayload) => {
+          const url = requestPayload?.url
+          if (!isNotEmptyString(url)) {
+            throw new BaseError(
+              `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'url' field is required`
+            )
+          }
+          const supervisionUser = requestPayload?.supervisionUser
+          const supervisionPassword = requestPayload?.supervisionPassword
+          this.chargingStation.setSupervisionUrl(
+            url,
+            typeof supervisionUser === 'string' ? supervisionUser : undefined,
+            typeof supervisionPassword === 'string' ? supervisionPassword : undefined
+          )
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.SIGN_CERTIFICATE,
+        this.passthrough(RequestCommand.SIGN_CERTIFICATE),
+      ],
+      [
+        BroadcastChannelProcedureName.START_AUTOMATIC_TRANSACTION_GENERATOR,
+        (requestPayload?: BroadcastChannelRequestPayload) => {
+          this.chargingStation.startAutomaticTransactionGenerator(requestPayload?.connectorIds)
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.START_CHARGING_STATION,
+        () => {
+          this.chargingStation.start()
+        },
+      ],
+      [BroadcastChannelProcedureName.START_TRANSACTION, this.handleStartTransaction.bind(this)],
+      [BroadcastChannelProcedureName.STATUS_NOTIFICATION, this.handleStatusNotification.bind(this)],
+      [
+        BroadcastChannelProcedureName.STOP_AUTOMATIC_TRANSACTION_GENERATOR,
+        (requestPayload?: BroadcastChannelRequestPayload) => {
+          this.chargingStation.stopAutomaticTransactionGenerator(requestPayload?.connectorIds)
+        },
+      ],
+      [
+        BroadcastChannelProcedureName.STOP_CHARGING_STATION,
+        async () => {
+          await this.chargingStation.stop()
+        },
+      ],
+      [BroadcastChannelProcedureName.STOP_TRANSACTION, this.handleStopTransaction.bind(this)],
+      [
+        BroadcastChannelProcedureName.TRANSACTION_EVENT,
+        this.passthrough(RequestCommand.TRANSACTION_EVENT),
+      ],
+      [
+        BroadcastChannelProcedureName.UNLOCK_CONNECTOR,
+        (requestPayload?: BroadcastChannelRequestPayload) => {
+          if (requestPayload?.connectorId == null) {
+            throw new BaseError(
+              `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'connectorId' field is required`
+            )
+          }
+          this.chargingStation.unlockConnector(requestPayload.connectorId)
+        },
+      ],
+    ])
+    this.onmessage = this.requestHandler.bind(this) as (message: unknown) => void
+    this.onmessageerror = this.messageErrorHandler.bind(this) as (message: unknown) => void
+  }
+
+  private cleanRequestPayload (
+    command: BroadcastChannelProcedureName,
+    requestPayload: BroadcastChannelRequestPayload
+  ): void {
+    delete requestPayload.hashId
+    delete requestPayload.hashIds
+    ![
+      BroadcastChannelProcedureName.START_AUTOMATIC_TRANSACTION_GENERATOR,
+      BroadcastChannelProcedureName.STOP_AUTOMATIC_TRANSACTION_GENERATOR,
+    ].includes(command) && delete requestPayload.connectorIds
+  }
+
+  private async commandHandler (
+    command: BroadcastChannelProcedureName,
+    requestPayload: BroadcastChannelRequestPayload
+    // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- broadcast-channel command handlers may resolve with no payload
+  ): Promise<CommandResponse | void> {
+    if (this.commandHandlers.has(command)) {
+      this.cleanRequestPayload(command, requestPayload)
+      const commandHandler = this.commandHandlers.get(command)
+      if (commandHandler == null) {
+        throw new BaseError(`Unknown worker broadcast channel command: '${command}'`)
+      }
+      if (isAsyncFunction(commandHandler)) {
+        return await commandHandler(requestPayload)
+      }
+      return (
+        commandHandler as (
+          requestPayload?: BroadcastChannelRequestPayload
+          // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- narrow cast onto the void-returning branch of the CommandHandler union
+        ) => CommandResponse | void
+      )(requestPayload)
+    }
+    throw new BaseError(`Unknown worker broadcast channel command: '${command}'`)
+  }
+
+  private commandResponseToResponsePayload (
+    command: BroadcastChannelProcedureName,
+    requestPayload: BroadcastChannelRequestPayload,
+    commandResponse: CommandResponse
+  ): BroadcastChannelResponsePayload {
+    const responseStatus = this.commandResponseToResponseStatus(command, commandResponse)
+    if (responseStatus === ResponseStatus.SUCCESS) {
+      return {
+        hashId: this.chargingStation.stationInfo?.hashId,
+        status: responseStatus,
+      }
+    }
+    return {
+      command,
+      commandResponse,
+      hashId: this.chargingStation.stationInfo?.hashId,
+      requestPayload,
+      status: responseStatus,
+    }
+  }
+
+  private commandResponseToResponseStatus (
+    command: BroadcastChannelProcedureName,
+    commandResponse: CommandResponse
+  ): ResponseStatus {
+    if (ChargingStationWorkerBroadcastChannel.emptyResponseCommands.has(command)) {
+      return isEmpty(commandResponse) ? ResponseStatus.SUCCESS : ResponseStatus.FAILURE
+    }
+    const statusCheck = ChargingStationWorkerBroadcastChannel.acceptedStatusCommands.get(command)
+    if (statusCheck != null) {
+      return statusCheck(commandResponse) ? ResponseStatus.SUCCESS : ResponseStatus.FAILURE
+    }
+    switch (command) {
+      case BroadcastChannelProcedureName.AUTHORIZE:
+        switch (this.chargingStation.stationInfo?.ocppVersion) {
+          case OCPPVersion.VERSION_16:
+            if (
+              (commandResponse as OCPP16AuthorizeResponse).idTagInfo.status ===
+              AuthorizationStatus.ACCEPTED
+            ) {
+              return ResponseStatus.SUCCESS
+            }
+            return ResponseStatus.FAILURE
+          case OCPPVersion.VERSION_20:
+          case OCPPVersion.VERSION_201:
+            if (
+              (commandResponse as OCPP20AuthorizeResponse).idTokenInfo.status ===
+              AuthorizationStatus.Accepted
+            ) {
+              return ResponseStatus.SUCCESS
+            }
+            return ResponseStatus.FAILURE
+          default:
+            return ResponseStatus.FAILURE
+        }
+      case BroadcastChannelProcedureName.START_TRANSACTION:
+      case BroadcastChannelProcedureName.STOP_TRANSACTION:
+        if (
+          (
+            commandResponse as
+              OCPP16AuthorizeResponse | StartTransactionResponse | StopTransactionResponse
+          ).idTagInfo?.status === AuthorizationStatus.ACCEPTED
+        ) {
+          return ResponseStatus.SUCCESS
+        }
+        return ResponseStatus.FAILURE
+      case BroadcastChannelProcedureName.HEARTBEAT:
+        return 'currentTime' in commandResponse ? ResponseStatus.SUCCESS : ResponseStatus.FAILURE
+      case BroadcastChannelProcedureName.TRANSACTION_EVENT:
+        if (
+          isEmpty(commandResponse) ||
+          (commandResponse as OCPP20TransactionEventResponse).idTokenInfo == null ||
+          (commandResponse as OCPP20TransactionEventResponse).idTokenInfo?.status ===
+            OCPP20AuthorizationStatusEnumType.Accepted
+        ) {
+          return ResponseStatus.SUCCESS
+        }
+        return ResponseStatus.FAILURE
+      default:
+        return ResponseStatus.FAILURE
+    }
+  }
+
+  private async handleBootNotification (
+    requestPayload?: BroadcastChannelRequestPayload
+  ): Promise<BootNotificationResponse> {
+    return await this.chargingStation.ocppRequestService.requestHandler<
+      BootNotificationRequest,
+      BootNotificationResponse
+    >(
+      this.chargingStation,
+      RequestCommand.BOOT_NOTIFICATION,
+      {
+        ...this.chargingStation.bootNotificationRequest,
+        ...requestPayload,
+      } as BootNotificationRequest,
+      {
+        skipBufferingOnError: true,
+        throwError: true,
+      }
+    )
+  }
+
+  private async handleMeterValues (
+    requestPayload?: BroadcastChannelRequestPayload
+  ): Promise<MeterValuesResponse> {
+    const payloadEvseId = (requestPayload as undefined | { evseId?: number })?.evseId
+    let connectorId = requestPayload?.connectorId
+    if (connectorId == null && payloadEvseId != null) {
+      const evseStatus = this.chargingStation.getEvseStatus(payloadEvseId)
+      for (const [candidateConnectorId, connectorStatus] of evseStatus?.connectors ?? []) {
+        if (connectorStatus.transactionStarted === true && connectorStatus.transactionId != null) {
+          connectorId = candidateConnectorId
+          break
+        }
+      }
+      connectorId ??= this.chargingStation.getConnectorIdByEvseId(payloadEvseId)
+    }
+    if (connectorId == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: Missing connectorId or evseId in request payload`
+      )
+    }
+    const isOcpp2 = isOCPP20x(this.chargingStation.stationInfo?.ocppVersion)
+    const evseId = (() => {
+      if (!isOcpp2) return payloadEvseId
+      if (payloadEvseId != null) {
+        if (this.chargingStation.getConnectorStatus(connectorId, payloadEvseId) == null) {
+          throw new BaseError(
+            `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: Connector ${connectorId.toString()} does not exist on EVSE ${payloadEvseId.toString()}`
+          )
+        }
+        return payloadEvseId
+      }
+      let resolvedEvseId: number | undefined
+      for (const candidate of this.chargingStation.iterateConnectors()) {
+        if (candidate.connectorId !== connectorId || candidate.evseId == null) continue
+        if (resolvedEvseId != null) {
+          throw new BaseError(
+            `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: 'evseId' field is required because connector ${connectorId.toString()} exists on multiple EVSEs`
+          )
+        }
+        resolvedEvseId = candidate.evseId
+      }
+      if (resolvedEvseId == null) {
+        throw new BaseError(
+          `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: Connector ${connectorId.toString()} does not exist on any EVSE`
+        )
+      }
+      return resolvedEvseId
+    })()
+    const connectorStatus = this.chargingStation.getConnectorStatus(connectorId, evseId)
+    const transactionId = connectorStatus?.transactionId
+    const interval = isOcpp2
+      ? OCPP20ServiceUtils.getTxUpdatedInterval(this.chargingStation)
+      : (() => {
+          const key = getConfigurationKey(
+            this.chargingStation,
+            StandardParametersKey.MeterValueSampleInterval
+          )
+          return key != null
+            ? secondsToMilliseconds(convertToInt(key.value))
+            : Constants.DEFAULT_METER_VALUES_INTERVAL_MS
+        })()
+    const requestedMeterValuesPayload: unknown = (
+      requestPayload as undefined | { meterValue?: unknown }
+    )?.meterValue
+    if (requestedMeterValuesPayload != null && !Array.isArray(requestedMeterValuesPayload)) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: meterValue must be an array`
+      )
+    }
+    const requestedMeterValues = requestedMeterValuesPayload as
+      OCPP16MeterValue[] | OCPP20MeterValue[] | undefined
+    if (
+      requestedMeterValues?.some(
+        meterValue =>
+          !Array.isArray(
+            (meterValue as null | undefined | { sampledValue?: unknown })?.sampledValue
+          )
+      ) === true
+    ) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: meterValue.sampledValue must be an array`
+      )
+    }
+    const requestedPublicKeyIncluded =
+      requestedMeterValues?.some(meterValue => {
+        if (isOcpp2 && isOCPP20MeterValue(meterValue)) {
+          return meterValue.sampledValue.some(sampledValue =>
+            isNotEmptyString(getRawSignedMeterValuePublicKey(sampledValue))
+          )
+        }
+        if (!isOcpp2 && isOCPP16MeterValue(meterValue)) {
+          return meterValue.sampledValue.some(sampledValue =>
+            isNotEmptyString(getOCPP16SignedMeterValuePublicKey(sampledValue))
+          )
+        }
+        throw new BaseError(
+          `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: meterValue does not match the station OCPP version`
+        )
+      }) === true
+    if (requestedMeterValues == null && connectorStatus?.transactionEnding === true) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: Transaction is ending`
+      )
+    }
+    let transactionDelivery: TransactionMeterValueDelivery | undefined
+    if (
+      (requestedMeterValues == null || requestedPublicKeyIncluded) &&
+      connectorStatus != null &&
+      transactionId != null
+    ) {
+      transactionDelivery = TransactionMeterValueDeliveryBarrier.beginIfIdle(
+        connectorStatus,
+        transactionId
+      )
+      if (transactionDelivery == null) {
+        const currentConnectorStatus = this.chargingStation.getConnectorStatus(connectorId, evseId)
+        if (
+          currentConnectorStatus === connectorStatus &&
+          currentConnectorStatus.transactionStarted === true &&
+          currentConnectorStatus.transactionEnding !== true &&
+          currentConnectorStatus.transactionId?.toString() === transactionId.toString()
+        ) {
+          throw new BaseError(
+            `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: MeterValues delivery is already in progress for this transaction`
+          )
+        }
+        throw new BaseError(
+          `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: Transaction is no longer active`
+        )
+      }
+      const deliveryTurn = transactionDelivery.waitForTurn()
+      if (deliveryTurn != null) await deliveryTurn
+      const currentConnectorStatus = this.chargingStation.getConnectorStatus(connectorId, evseId)
+      if (
+        currentConnectorStatus !== connectorStatus ||
+        currentConnectorStatus.transactionStarted !== true ||
+        currentConnectorStatus.transactionEnding === true ||
+        currentConnectorStatus.transactionId?.toString() !== transactionId.toString()
+      ) {
+        transactionDelivery.settle(true)
+        throw new BaseError(
+          `${this.chargingStation.logPrefix()} ${moduleName}.handleMeterValues: Transaction is no longer active`
+        )
+      }
+    }
+    const intervalBaselineKey = isOcpp2
+      ? buildConfigKey(
+        OCPP20ComponentName.SampledDataCtrlr,
+        OCPP20RequiredVariableName.TxUpdatedMeasurands
+      )
+      : 'default'
+    const intervalState =
+      requestedMeterValues == null && connectorStatus != null && transactionId != null
+        ? captureTransactionIntervalState(connectorStatus)
+        : undefined
+    let publicKeyIncluded = requestedPublicKeyIncluded
+    let meterValues: (OCPP16MeterValue | OCPP20MeterValue)[]
+    try {
+      meterValues = (() => {
+        if (requestedMeterValues != null) return requestedMeterValues
+        const meterValue =
+          isOcpp2 && transactionId != null
+            ? OCPP20ServiceUtils.buildTransactionMeterValue(
+              this.chargingStation,
+              connectorId,
+              evseId,
+              transactionId,
+              interval,
+              buildConfigKey(
+                OCPP20ComponentName.SampledDataCtrlr,
+                OCPP20RequiredVariableName.TxUpdatedMeasurands
+              ),
+              OCPP20ReadingContextEnumType.SAMPLE_PERIODIC
+            )
+            : buildMeterValue(this.chargingStation, transactionId, interval)
+        // OCPP 1.6 Signed Meter Values whitepaper §3.3.6: mirror the periodic
+        // loop (`OCPP16ServiceUtils.startUpdatedMeterValues`) and append a paired
+        // SignedData SampledValue when signing is enabled for the connector.
+        // OCPP 2.0.x signing is applied inline by the versioned dispatcher.
+        if (!isOcpp2 && transactionId != null) {
+          if (!isOCPP16MeterValue(meterValue)) {
+            throw new BaseError('Generated MeterValue does not match OCPP 1.6')
+          }
+          publicKeyIncluded = OCPP16ServiceUtils.appendSignedUpdatedReadings(
+            this.chargingStation,
+            connectorId,
+            convertToInt(transactionId),
+            meterValue
+          )
+        } else if (isOcpp2) {
+          if (!isOCPP20MeterValue(meterValue)) {
+            throw new BaseError('Generated MeterValue does not match OCPP 2.0.x')
+          }
+          publicKeyIncluded = meterValue.sampledValue.some(sampledValue =>
+            isNotEmptyString(getRawSignedMeterValuePublicKey(sampledValue))
+          )
+        }
+        return [meterValue]
+      })()
+      if (intervalState != null && connectorStatus != null) {
+        completeTransactionIntervalState(intervalState, intervalBaselineKey, meterValues)
+      }
+    } catch (error) {
+      transactionDelivery?.settle(true)
+      throw error
+    }
+    const request = (
+      isOcpp2
+        ? {
+            ...(requestPayload?.customData != null && { customData: requestPayload.customData }),
+            evseId,
+            meterValue: meterValues,
+          }
+        : {
+            ...requestPayload,
+            connectorId,
+            meterValue: meterValues,
+          }
+    ) as MeterValuesRequest
+    const publicKeyDeliveryToken =
+      connectorStatus != null && transactionId != null
+        ? claimPublicKeyDelivery(connectorStatus, transactionId, request, publicKeyIncluded)
+        : undefined
+    const deliveryState = {
+      buffered: false,
+      callError: false,
+      responseReceived: false,
+      sent: false,
+      transportErrorAmbiguous: false,
+    }
+    let deliverySettled = false
+    const markDeliverySettled = (definitivelyRejected = false): void => {
+      if (deliverySettled) return
+      deliverySettled = true
+      transactionDelivery?.settle(definitivelyRejected)
+    }
+    let restored = false
+    const restoreRejectedDelivery = (): void => {
+      if (restored) return
+      restored = true
+      if (intervalState != null && connectorStatus != null) {
+        restoreTransactionIntervalState(intervalState, connectorStatus, intervalBaselineKey)
+      }
+      releasePublicKeyDelivery(publicKeyDeliveryToken)
+    }
+    const requestParams: RequestParams = {
+      ...this.requestParams,
+      ...(requestedMeterValues == null && {
+        bufferOnErrorDuringStationStop: true,
+        skipBufferingOnError: true,
+      }),
+      onError: (error, isCallError) => {
+        deliveryState.callError ||= isCallError
+        if (isCallError || deliveryState.buffered) {
+          const definitivelyRejected = !deliveryState.transportErrorAmbiguous
+          if (definitivelyRejected) {
+            restoreRejectedDelivery()
+          } else {
+            retainPublicKeyDelivery(publicKeyDeliveryToken)
+          }
+          markDeliverySettled(definitivelyRejected)
+        }
+        this.requestParams.onError?.(error, isCallError)
+      },
+      onMessageSent: () => {
+        deliveryState.sent = true
+        this.requestParams.onMessageSent?.()
+      },
+      onRequestBuffered: () => {
+        deliveryState.buffered = true
+        transactionDelivery?.markBuffered()
+        this.requestParams.onRequestBuffered?.()
+      },
+      onResponseReceived: () => {
+        deliveryState.responseReceived = true
+        retainPublicKeyDelivery(publicKeyDeliveryToken)
+        markDeliverySettled()
+        this.requestParams.onResponseReceived?.()
+      },
+      onTransportError: (error, deliveryAmbiguous) => {
+        deliveryState.transportErrorAmbiguous ||= deliveryAmbiguous
+        this.requestParams.onTransportError?.(error, deliveryAmbiguous)
+      },
+    }
+    try {
+      const response = await this.chargingStation.ocppRequestService.requestHandler<
+        MeterValuesRequest,
+        MeterValuesResponse
+      >(this.chargingStation, RequestCommand.METER_VALUES, request, requestParams)
+      retainPublicKeyDelivery(publicKeyDeliveryToken)
+      markDeliverySettled()
+      return response
+    } catch (error) {
+      const definitelyUnsent =
+        !deliveryState.buffered &&
+        !deliveryState.callError &&
+        !deliveryState.responseReceived &&
+        !deliveryState.sent &&
+        !deliveryState.transportErrorAmbiguous
+      if (definitelyUnsent) {
+        restoreRejectedDelivery()
+      } else if (
+        !deliveryState.buffered &&
+        (deliveryState.sent ||
+          deliveryState.responseReceived ||
+          deliveryState.transportErrorAmbiguous)
+      ) {
+        retainPublicKeyDelivery(publicKeyDeliveryToken)
+      }
+      if (!deliveryState.buffered) markDeliverySettled(definitelyUnsent)
+      throw error
+    }
+  }
+
+  private async handleStartTransaction (
+    requestPayload?: BroadcastChannelRequestPayload
+  ): Promise<StartTransactionResponse> {
+    if (this.chargingStation.stationInfo?.ocppVersion !== OCPPVersion.VERSION_16) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStartTransaction: StartTransaction is only supported with OCPP 1.6`
+      )
+    }
+    const { connectorId, idTag, ...requestOverrides } = requestPayload ?? {}
+    if (connectorId == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStartTransaction: 'connectorId' field is required`
+      )
+    }
+    if (idTag != null && typeof idTag !== 'string') {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStartTransaction: 'idTag' field must be a string`
+      )
+    }
+    return await OCPP16ServiceUtils.startTransactionOnConnector(
+      this.chargingStation,
+      connectorId,
+      idTag ?? undefined,
+      this.requestParams,
+      requestOverrides
+    )
+  }
+
+  private async handleStatusNotification (
+    requestPayload?: BroadcastChannelRequestPayload
+  ): Promise<void> {
+    if (requestPayload?.connectorId == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStatusNotification: 'connectorId' field is required`
+      )
+    }
+    const options = requestPayload as StatusNotificationOptions
+    if (options.connectorStatus == null && options.status == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStatusNotification: 'connectorStatus' or 'status' field is required`
+      )
+    }
+    await sendAndSetConnectorStatus(this.chargingStation, options)
+  }
+
+  private async handleStopTransaction (
+    requestPayload?: BroadcastChannelRequestPayload
+  ): Promise<StopTransactionResponse> {
+    if (this.chargingStation.stationInfo?.ocppVersion !== OCPPVersion.VERSION_16) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStopTransaction: StopTransaction is only supported by OCPP 1.6 charging stations`
+      )
+    }
+    const transactionId = requestPayload?.transactionId
+    if (transactionId == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStopTransaction: 'transactionId' field is required`
+      )
+    }
+    const connectorId = this.chargingStation.getConnectorIdByTransactionId(transactionId)
+    if (connectorId == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStopTransaction: No active transaction found for transactionId '${transactionId.toString()}'`
+      )
+    }
+    const hasTimestamp = requestPayload != null && Object.hasOwn(requestPayload, 'timestamp')
+    const { idTag, reason, timestamp, transactionData } =
+      requestPayload as Partial<StopTransactionRequest>
+    return await OCPP16ServiceUtils.stopTransactionOnConnector(
+      this.chargingStation,
+      connectorId,
+      reason,
+      {
+        ...(idTag != null && { idTag }),
+        ...(hasTimestamp && { timestamp }),
+        ...(transactionData != null && { transactionData }),
+      },
+      this.requestParams
+    )
+  }
+
+  private messageErrorHandler (messageEvent: MessageEvent): void {
+    logger.error(
+      `${this.chargingStation.logPrefix()} ${moduleName}.messageErrorHandler: Error at handling message:`,
+      messageEvent
+    )
+  }
+
+  private passthrough (command: RequestCommand): CommandHandler {
+    return async (requestPayload?: BroadcastChannelRequestPayload): Promise<CommandResponse> => {
+      const result = await this.chargingStation.ocppRequestService.requestHandler(
+        this.chargingStation,
+        command,
+        requestPayload,
+        this.requestParams
+      )
+      return result as CommandResponse
+    }
+  }
+
+  private requestHandler (messageEvent: MessageEvent): void {
+    const validatedMessageEvent = this.validateMessageEvent(messageEvent)
+    if (validatedMessageEvent === false) {
+      return
+    }
+    if (this.isResponse(validatedMessageEvent.data)) {
+      return
+    }
+    const [uuid, command, requestPayload] = validatedMessageEvent.data as BroadcastChannelRequest
+    if (
+      requestPayload.hashIds != null &&
+      !requestPayload.hashIds.includes(this.chargingStation.stationInfo?.hashId ?? '')
+    ) {
+      return
+    }
+    if (requestPayload.hashId != null) {
+      logger.error(
+        `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'hashId' field usage in PDU is deprecated, use 'hashIds' array instead`
+      )
+      return
+    }
+    let responsePayload: BroadcastChannelResponsePayload | undefined
+    // eslint-disable-next-line promise/catch-or-return -- errors are handled inside .then via the response payload; the returned promise is intentionally discarded
+    this.commandHandler(command, requestPayload)
+      .then(commandResponse => {
+        if (commandResponse == null || isEmpty(commandResponse)) {
+          responsePayload = {
+            hashId: this.chargingStation.stationInfo?.hashId,
+            status: ResponseStatus.SUCCESS,
+          }
+        } else {
+          responsePayload = this.commandResponseToResponsePayload(
+            command,
+            requestPayload,
+            commandResponse
+          )
+        }
+        return undefined
+      })
+      .catch((error: unknown) => {
+        logger.error(
+          `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: Handle request error:`,
+          error
+        )
+        delete requestPayload.supervisionPassword
+        delete requestPayload.supervisionUser
+        responsePayload = {
+          command,
+          errorDetails: error instanceof OCPPError ? error.details : undefined,
+          errorMessage: getErrorMessage(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+          hashId: this.chargingStation.stationInfo?.hashId,
+          requestPayload,
+          status: ResponseStatus.FAILURE,
+        } satisfies BroadcastChannelResponsePayload
+        return undefined
+      })
+      .finally(() => {
+        this.sendResponse([
+          uuid,
+          responsePayload ?? {
+            command,
+            hashId: this.chargingStation.stationInfo?.hashId,
+            status: ResponseStatus.FAILURE,
+          },
+        ])
+      })
+  }
+}

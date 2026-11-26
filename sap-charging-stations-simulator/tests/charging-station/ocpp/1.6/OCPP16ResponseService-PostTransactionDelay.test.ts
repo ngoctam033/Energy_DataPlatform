@@ -1,0 +1,396 @@
+/**
+ * @file Tests for OCPP16ResponseService postTransactionDelay
+ * @description Verifies the postTransactionDelay feature in OCPP 1.6 StopTransaction response
+ * handling: Finishing→Available transitions, zero-delay immediate transitions,
+ * availability re-evaluation, and shutdown-during-delay safety.
+ */
+
+import assert from 'node:assert/strict'
+import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
+import type { OCPP16ResponseService } from '../../../../src/charging-station/ocpp/1.6/OCPP16ResponseService.js'
+import type {
+  OCPP16StopTransactionRequest,
+  OCPP16StopTransactionResponse,
+} from '../../../../src/types/index.js'
+
+import { OCPP16ServiceUtils } from '../../../../src/charging-station/ocpp/1.6/OCPP16ServiceUtils.js'
+import {
+  AvailabilityType,
+  ChargingStationEvents,
+  OCPP16AuthorizationStatus,
+  OCPP16ChargePointStatus,
+  OCPP16RequestCommand,
+} from '../../../../src/types/index.js'
+import {
+  flushMicrotasks,
+  setupConnectorWithTransaction,
+  standardCleanup,
+  withMockTimers,
+} from '../../../helpers/TestLifecycleHelpers.js'
+import { createOCPP16ResponseTestContext, setMockRequestHandler } from './OCPP16TestUtils.js'
+
+await describe('OCPP16ResponseService — PostTransactionDelay', async () => {
+  let station: ChargingStation
+  let responseService: OCPP16ResponseService
+  let requestCalls: unknown[][]
+
+  beforeEach(() => {
+    const ctx = createOCPP16ResponseTestContext({
+      stationInfo: { postTransactionDelay: 5 },
+    })
+    station = ctx.station
+    responseService = ctx.responseService
+    station.started = true
+    const testableStation = station as unknown as {
+      isStopping: () => boolean
+      stopping: boolean
+    }
+    testableStation.stopping = false
+    testableStation.isStopping = () => testableStation.stopping
+
+    requestCalls = []
+    setMockRequestHandler(station, (...args: unknown[]) => {
+      requestCalls.push(args)
+      return Promise.resolve({})
+    })
+
+    mock.method(OCPP16ServiceUtils, 'startUpdatedMeterValues', () => {
+      /* noop */
+    })
+    mock.method(OCPP16ServiceUtils, 'stopUpdatedMeterValues', () => {
+      /* noop */
+    })
+  })
+
+  afterEach(() => {
+    standardCleanup()
+  })
+
+  await it('should send Finishing then Available after configured delay', async t => {
+    // Arrange
+    setupConnectorWithTransaction(station, 1, { transactionId: 100 })
+    const requestPayload: OCPP16StopTransactionRequest = {
+      meterStop: 1000,
+      timestamp: new Date(),
+      transactionId: 100,
+    }
+    const responsePayload: OCPP16StopTransactionResponse = {
+      idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED },
+    }
+
+    // Act
+    await withMockTimers(t, ['setTimeout'], async () => {
+      const promise = responseService.responseHandler(
+        station,
+        OCPP16RequestCommand.STOP_TRANSACTION,
+        responsePayload,
+        requestPayload
+      )
+      for (let i = 0; i < 10; i++) {
+        await flushMicrotasks()
+      }
+      t.mock.timers.tick(5000)
+      for (let i = 0; i < 10; i++) {
+        await flushMicrotasks()
+      }
+      await promise
+    })
+
+    // Assert
+    const statusCalls = requestCalls.filter(
+      call =>
+        call[1] === OCPP16RequestCommand.STATUS_NOTIFICATION &&
+        (call[2] as Record<string, unknown>).connectorId === 1
+    )
+    assert.ok(
+      statusCalls.length >= 2,
+      `Expected at least 2 status calls, got ${String(statusCalls.length)}`
+    )
+    assert.strictEqual(
+      (statusCalls[0][2] as Record<string, unknown>).status,
+      OCPP16ChargePointStatus.Finishing
+    )
+    assert.strictEqual(
+      (statusCalls[1][2] as Record<string, unknown>).status,
+      OCPP16ChargePointStatus.Available
+    )
+  })
+
+  await it('should send Available immediately when postTransactionDelay is 0', async () => {
+    // Arrange
+    assert.ok(station.stationInfo != null, 'stationInfo should be defined')
+    station.stationInfo.postTransactionDelay = 0
+    setupConnectorWithTransaction(station, 1, { transactionId: 200 })
+    const requestPayload: OCPP16StopTransactionRequest = {
+      meterStop: 2000,
+      timestamp: new Date(),
+      transactionId: 200,
+    }
+    const responsePayload: OCPP16StopTransactionResponse = {
+      idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED },
+    }
+
+    // Act
+    await responseService.responseHandler(
+      station,
+      OCPP16RequestCommand.STOP_TRANSACTION,
+      responsePayload,
+      requestPayload
+    )
+
+    // Assert
+    const statusCalls = requestCalls.filter(
+      call =>
+        call[1] === OCPP16RequestCommand.STATUS_NOTIFICATION &&
+        (call[2] as Record<string, unknown>).connectorId === 1
+    )
+    const finishingCalls = statusCalls.filter(
+      call => (call[2] as Record<string, unknown>).status === OCPP16ChargePointStatus.Finishing
+    )
+    assert.strictEqual(
+      finishingCalls.length,
+      0,
+      'No Finishing status should be sent when delay is 0'
+    )
+    const availableCalls = statusCalls.filter(
+      call => (call[2] as Record<string, unknown>).status === OCPP16ChargePointStatus.Available
+    )
+    assert.ok(availableCalls.length >= 1, 'Should send Available status')
+  })
+
+  await it('should send Unavailable after delay when station becomes unavailable during finishing', async t => {
+    // Arrange
+    setupConnectorWithTransaction(station, 1, { transactionId: 300 })
+    const connector0 = station.getConnectorStatus(0)
+    if (connector0 != null) {
+      connector0.availability = AvailabilityType.Inoperative
+    }
+
+    const requestPayload: OCPP16StopTransactionRequest = {
+      meterStop: 3000,
+      timestamp: new Date(),
+      transactionId: 300,
+    }
+    const responsePayload: OCPP16StopTransactionResponse = {
+      idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED },
+    }
+
+    // Act
+    await withMockTimers(t, ['setTimeout'], async () => {
+      const promise = responseService.responseHandler(
+        station,
+        OCPP16RequestCommand.STOP_TRANSACTION,
+        responsePayload,
+        requestPayload
+      )
+      for (let i = 0; i < 10; i++) {
+        await flushMicrotasks()
+      }
+      t.mock.timers.tick(5000)
+      for (let i = 0; i < 10; i++) {
+        await flushMicrotasks()
+      }
+      await promise
+    })
+
+    // Assert
+    const statusCalls = requestCalls.filter(
+      call =>
+        call[1] === OCPP16RequestCommand.STATUS_NOTIFICATION &&
+        (call[2] as Record<string, unknown>).connectorId === 1
+    )
+    assert.ok(
+      statusCalls.length >= 2,
+      `Expected at least 2 status calls, got ${String(statusCalls.length)}`
+    )
+    assert.strictEqual(
+      (statusCalls[0][2] as Record<string, unknown>).status,
+      OCPP16ChargePointStatus.Finishing
+    )
+    assert.strictEqual(
+      (statusCalls[1][2] as Record<string, unknown>).status,
+      OCPP16ChargePointStatus.Unavailable
+    )
+  })
+
+  await it('should abort the delay when stop lifecycle begins without post-delay mutation', async t => {
+    // Arrange
+    const lifecycleAbortController = new AbortController()
+    Object.defineProperty(station, 'lifecycleAbortSignal', {
+      configurable: true,
+      value: lifecycleAbortController.signal,
+    })
+    setupConnectorWithTransaction(station, 1, { transactionId: 400 })
+    const requestPayload: OCPP16StopTransactionRequest = {
+      meterStop: 4000,
+      timestamp: new Date(),
+      transactionId: 400,
+    }
+    const responsePayload: OCPP16StopTransactionResponse = {
+      idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED },
+    }
+
+    // Act
+    await withMockTimers(t, ['setTimeout'], async () => {
+      let handlerSettled = false
+      const promise = responseService
+        .responseHandler(
+          station,
+          OCPP16RequestCommand.STOP_TRANSACTION,
+          responsePayload,
+          requestPayload
+        )
+        .then(() => {
+          handlerSettled = true
+          return undefined
+        })
+      for (let index = 0; index < 10; index++) {
+        await flushMicrotasks()
+      }
+
+      ;(station as unknown as { stopping: boolean }).stopping = true
+      lifecycleAbortController.abort()
+      for (let index = 0; index < 10; index++) {
+        await flushMicrotasks()
+      }
+
+      assert.strictEqual(handlerSettled, true, 'Stop lifecycle abort should release the handler')
+      await promise
+      const connectorStatus = station.getConnectorStatus(1)
+      if (connectorStatus == null) {
+        assert.fail('Expected connector 1 to exist')
+      }
+      assert.strictEqual(connectorStatus.transactionStarted, false)
+      assert.strictEqual(connectorStatus.transactionId, undefined)
+      assert.strictEqual(connectorStatus.transactionIdTag, undefined)
+      assert.strictEqual(connectorStatus.locked, false)
+      assert.strictEqual(connectorStatus.status, OCPP16ChargePointStatus.Available)
+      const requestCountAfterAbort = requestCalls.length
+      t.mock.timers.tick(5000)
+      for (let index = 0; index < 10; index++) {
+        await flushMicrotasks()
+      }
+      assert.strictEqual(
+        requestCalls.length,
+        requestCountAfterAbort,
+        'No delayed request should be sent after lifecycle abort'
+      )
+      assert.strictEqual(
+        connectorStatus.status,
+        OCPP16ChargePointStatus.Available,
+        'Restart-safe local status should remain stable after the abandoned delay expires'
+      )
+    })
+
+    // Assert
+    const statusCalls = requestCalls.filter(
+      call =>
+        call[1] === OCPP16RequestCommand.STATUS_NOTIFICATION &&
+        (call[2] as Record<string, unknown>).connectorId === 1
+    )
+    assert.strictEqual(statusCalls.length, 1, 'Only Finishing status should be sent')
+    assert.strictEqual(
+      (statusCalls[0][2] as Record<string, unknown>).status,
+      OCPP16ChargePointStatus.Finishing
+    )
+    const connectorStatus = station.getConnectorStatus(1)
+    if (connectorStatus == null) {
+      assert.fail('Expected connector 1 to exist')
+    }
+    assert.strictEqual(connectorStatus.transactionStarted, false)
+    assert.strictEqual(connectorStatus.transactionId, undefined)
+    assert.strictEqual(connectorStatus.transactionIdTag, undefined)
+    assert.strictEqual(connectorStatus.locked, false)
+    assert.strictEqual(connectorStatus.status, OCPP16ChargePointStatus.Available)
+  })
+
+  await it('should skip the delay and status emission when shutdown is already in progress', async t => {
+    // Arrange
+    const lifecycleAbortController = new AbortController()
+    Object.defineProperty(station, 'lifecycleAbortSignal', {
+      configurable: true,
+      value: lifecycleAbortController.signal,
+    })
+    setupConnectorWithTransaction(station, 1, {
+      idTag: 'SHUTDOWN-TAG',
+      transactionId: 500,
+    })
+    const emitSpy = mock.method(station, 'emitChargingStationEvent')
+    const updateAuthMock = mock.method(
+      OCPP16ServiceUtils,
+      'updateAuthorizationCache',
+      () => undefined
+    )
+    ;(station as unknown as { stopping: boolean }).stopping = true
+    const requestPayload: OCPP16StopTransactionRequest = {
+      meterStop: 5000,
+      timestamp: new Date(),
+      transactionId: 500,
+    }
+    const responsePayload: OCPP16StopTransactionResponse = {
+      idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED },
+    }
+    let handlerSettledBeforeDelay = false
+
+    // Act
+    await withMockTimers(t, ['setTimeout'], async () => {
+      let handlerSettled = false
+      const promise = responseService
+        .responseHandler(
+          station,
+          OCPP16RequestCommand.STOP_TRANSACTION,
+          responsePayload,
+          requestPayload
+        )
+        .then(() => {
+          handlerSettled = true
+          return undefined
+        })
+      for (let index = 0; index < 10; index++) {
+        await flushMicrotasks()
+      }
+      handlerSettledBeforeDelay = handlerSettled
+
+      // Release a buggy implementation's pending timer so the test can finish promptly.
+      t.mock.timers.tick(5000)
+      for (let index = 0; index < 10; index++) {
+        await flushMicrotasks()
+      }
+      await promise
+    })
+
+    // Assert
+    assert.strictEqual(lifecycleAbortController.signal.aborted, false)
+    assert.strictEqual(
+      handlerSettledBeforeDelay,
+      true,
+      'Shutdown cleanup should not wait for postTransactionDelay'
+    )
+    const connectorStatus = station.getConnectorStatus(1)
+    if (connectorStatus == null) {
+      assert.fail('Expected connector 1 to exist')
+    }
+    assert.strictEqual(connectorStatus.transactionStarted, false)
+    assert.strictEqual(connectorStatus.transactionId, undefined)
+    assert.strictEqual(connectorStatus.transactionIdTag, undefined)
+    assert.strictEqual(connectorStatus.locked, false)
+    assert.strictEqual(connectorStatus.status, OCPP16ChargePointStatus.Available)
+    assert.strictEqual(updateAuthMock.mock.callCount(), 1)
+    assert.strictEqual(updateAuthMock.mock.calls[0].arguments[1], 'SHUTDOWN-TAG')
+    assert.deepStrictEqual(updateAuthMock.mock.calls[0].arguments[2], responsePayload.idTagInfo)
+    const statusCalls = requestCalls.filter(
+      call => call[1] === OCPP16RequestCommand.STATUS_NOTIFICATION
+    )
+    assert.strictEqual(statusCalls.length, 0, 'Shutdown cleanup should send no StatusNotification')
+    const connectorStatusEvents = emitSpy.mock.calls.filter(
+      call => call.arguments[0] === ChargingStationEvents.connectorStatusChanged
+    )
+    assert.strictEqual(
+      connectorStatusEvents.length,
+      0,
+      'Shutdown cleanup should emit no connector status event'
+    )
+  })
+})

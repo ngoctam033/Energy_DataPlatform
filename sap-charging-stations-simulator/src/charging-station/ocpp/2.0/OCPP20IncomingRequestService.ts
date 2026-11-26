@@ -1,0 +1,5656 @@
+// Partial Copyright Jerome Benoit. 2021-2025. All Rights Reserved.
+
+import type { ValidateFunction } from 'ajv'
+
+import { secondsToMilliseconds } from 'date-fns'
+
+import type { OCPP20IdTokenEnumType } from '../../../types/index.js'
+
+import { OCPPError } from '../../../exception/index.js'
+import {
+  AttributeEnumType,
+  CertificateSigningUseEnumType,
+  ChangeAvailabilityStatusEnumType,
+  ConfigurationStatus,
+  ConnectorEnumType,
+  type ConnectorStatus,
+  ConnectorStatusEnum,
+  CustomerInformationStatusEnumType,
+  DataEnumType,
+  DataTransferStatusEnumType,
+  DeleteCertificateStatusEnumType,
+  ErrorType,
+  type EvseStatus,
+  type FirmwareType,
+  GenericDeviceModelStatusEnumType,
+  GenericStatus,
+  GetCertificateIdUseEnumType,
+  GetInstalledCertificateStatusEnumType,
+  GetVariableStatusEnumType,
+  type IncomingRequestCommand,
+  type IncomingRequestHandler,
+  InstallCertificateStatusEnumType,
+  InstallCertificateUseEnumType,
+  type JsonType,
+  LogStatusEnumType,
+  MessageTriggerEnumType,
+  OCPP20AuthorizationStatusEnumType,
+  type OCPP20BootNotificationRequest,
+  type OCPP20BootNotificationResponse,
+  type OCPP20CertificateSignedRequest,
+  type OCPP20CertificateSignedResponse,
+  type OCPP20ChangeAvailabilityRequest,
+  type OCPP20ChangeAvailabilityResponse,
+  OCPP20ChargingProfileKindEnumType,
+  OCPP20ChargingProfilePurposeEnumType,
+  type OCPP20ChargingProfileType,
+  OCPP20ChargingRateUnitEnumType,
+  type OCPP20ChargingScheduleType,
+  type OCPP20ClearCacheResponse,
+  OCPP20ComponentName,
+  OCPP20ConnectorStatusEnumType,
+  type OCPP20CustomerInformationRequest,
+  type OCPP20CustomerInformationResponse,
+  type OCPP20DataTransferRequest,
+  type OCPP20DataTransferResponse,
+  type OCPP20DeleteCertificateRequest,
+  type OCPP20DeleteCertificateResponse,
+  OCPP20DeviceInfoVariableName,
+  OCPP20FirmwareStatusEnumType,
+  type OCPP20FirmwareStatusNotificationRequest,
+  type OCPP20FirmwareStatusNotificationResponse,
+  type OCPP20GetBaseReportRequest,
+  type OCPP20GetBaseReportResponse,
+  type OCPP20GetInstalledCertificateIdsRequest,
+  type OCPP20GetInstalledCertificateIdsResponse,
+  type OCPP20GetLocalListVersionResponse,
+  type OCPP20GetLogRequest,
+  type OCPP20GetLogResponse,
+  type OCPP20GetTransactionStatusRequest,
+  type OCPP20GetTransactionStatusResponse,
+  type OCPP20GetVariablesRequest,
+  type OCPP20GetVariablesResponse,
+  type OCPP20HeartbeatRequest,
+  type OCPP20HeartbeatResponse,
+  type OCPP20IdTokenType,
+  OCPP20IncomingRequestCommand,
+  type OCPP20InstallCertificateRequest,
+  type OCPP20InstallCertificateResponse,
+  type OCPP20LogStatusNotificationRequest,
+  type OCPP20LogStatusNotificationResponse,
+  type OCPP20MeterValue,
+  type OCPP20MeterValuesRequest,
+  type OCPP20NotifyCustomerInformationRequest,
+  type OCPP20NotifyCustomerInformationResponse,
+  type OCPP20NotifyReportRequest,
+  type OCPP20NotifyReportResponse,
+  OCPP20OperationalStatusEnumType,
+  OCPP20OptionalVariableName,
+  OCPP20ReadingContextEnumType,
+  OCPP20ReasonEnumType,
+  OCPP20RequestCommand,
+  type OCPP20RequestStartTransactionRequest,
+  type OCPP20RequestStartTransactionResponse,
+  type OCPP20RequestStopTransactionRequest,
+  type OCPP20RequestStopTransactionResponse,
+  OCPP20RequiredVariableName,
+  type OCPP20ResetRequest,
+  type OCPP20ResetResponse,
+  type OCPP20SecurityEventNotificationRequest,
+  type OCPP20SecurityEventNotificationResponse,
+  type OCPP20SendLocalListRequest,
+  type OCPP20SendLocalListResponse,
+  OCPP20SendLocalListStatusEnumType,
+  type OCPP20SetNetworkProfileRequest,
+  type OCPP20SetNetworkProfileResponse,
+  type OCPP20SetVariablesRequest,
+  type OCPP20SetVariablesResponse,
+  type OCPP20StatusNotificationResponse,
+  OCPP20TransactionEventEnumType,
+  type OCPP20TriggerMessageRequest,
+  type OCPP20TriggerMessageResponse,
+  OCPP20TriggerReasonEnumType,
+  type OCPP20UnlockConnectorRequest,
+  type OCPP20UnlockConnectorResponse,
+  OCPP20UpdateEnumType,
+  type OCPP20UpdateFirmwareRequest,
+  type OCPP20UpdateFirmwareResponse,
+  OCPP20VendorVariableName,
+  OCPPVersion,
+  ReasonCodeEnumType,
+  RegistrationStatusEnumType,
+  ReportBaseEnumType,
+  type ReportDataType,
+  RequestStartStopStatusEnumType,
+  ResetEnumType,
+  ResetStatusEnumType,
+  SetNetworkProfileStatusEnumType,
+  SetVariableStatusEnumType,
+  type StatusNotificationOptions,
+  StopTransactionReason,
+  TriggerMessageStatusEnumType,
+  UnlockStatusEnumType,
+  UpdateFirmwareStatusEnumType,
+  UploadLogStatusEnumType,
+  type UUIDv4,
+} from '../../../types/index.js'
+import {
+  convertToDate,
+  convertToIntOrNaN,
+  ensureError,
+  generateUUID,
+  getErrorMessage,
+  handleIncomingRequestError,
+  interruptibleSleep,
+  isEmpty,
+  isNotEmptyArray,
+  isNotEmptyString,
+  logger,
+  promiseWithTimeout,
+  truncateId,
+  validateUUID,
+} from '../../../utils/index.js'
+import {
+  addConfigurationKey,
+  buildConfigKey,
+  type ChargingStation,
+  getConfigurationKey,
+  getRawSignedMeterValuePublicKey,
+  hasPendingReservation,
+  hasPendingReservations,
+  hasQueuedEndedTransactionEvent,
+  isTransactionEventQueueStaged,
+  resetConnectorStatus,
+} from '../../index.js'
+import {
+  captureTransactionIntervalState,
+  completeTransactionIntervalState,
+  recordFrozenTransactionIntervalEmission,
+  resolveInletToOutputEfficiency,
+  restoreTransactionIntervalState,
+  type TransactionMeterValueDelivery,
+  TransactionMeterValueDeliveryBarrier,
+} from '../../meter-values/index.js'
+import {
+  AuthContext,
+  AuthResultStatus,
+  type DifferentialAuthEntry,
+  type LocalAuthEntry,
+  mapOCPP20TokenType,
+  OCPPAuthServiceFactory,
+} from '../auth/index.js'
+import {
+  restoreConnectorStatus,
+  sendAndSetConnectorStatus,
+} from '../OCPPConnectorStatusOperations.js'
+import { OCPPIncomingRequestService } from '../OCPPIncomingRequestService.js'
+import {
+  buildClockAlignedConnectorMeterValue,
+  createPayloadValidatorMap,
+  isIncomingRequestCommandSupported,
+} from '../OCPPServiceUtils.js'
+import {
+  claimPublicKeyDelivery,
+  type PublicKeyDeliveryToken,
+} from '../OCPPSignedMeterValueUtils.js'
+import {
+  type GetInstalledCertificatesResult,
+  hasCertificateManager,
+  type StoreCertificateResult,
+} from './OCPP20CertificateManager.js'
+import { OCPP20CertSigningRetryManager } from './OCPP20CertSigningRetryManager.js'
+import { OCPP20Constants } from './OCPP20Constants.js'
+import {
+  type IntervalBaselineRestore,
+  isOCPP20ConnectorStatus,
+  isTransactionEnding,
+  OCPP20ServiceUtils,
+  type TriggeredTransactionEventDeliveryReservation,
+} from './OCPP20ServiceUtils.js'
+import { OCPP20VariableManager } from './OCPP20VariableManager.js'
+import { getVariableMetadata, VARIABLE_REGISTRY } from './OCPP20VariableRegistry.js'
+
+const moduleName = 'OCPP20IncomingRequestService'
+
+// GetBaseReport response chunking: conservative project default.
+// The actual per-device limits are reported at runtime by the Charging Station via
+// OCPP 2.0.1 §2.1.16 DeviceDataCtrlr.ItemsPerMessage(instance:GetReport) and
+// §2.1.18 DeviceDataCtrlr.BytesPerMessage(instance:GetReport); both are ReadOnly
+// device capability declarations with no spec-defined ceiling.
+const MAX_ITEMS_PER_REPORT_MESSAGE = 100 as const
+
+// V2GCertificateChain has no InstallCertificateUse counterpart, so it collapses onto V2GRootCertificate.
+const getCertificateIdUseToInstallCertificateUse: Readonly<
+  Record<GetCertificateIdUseEnumType, InstallCertificateUseEnumType>
+> = Object.freeze({
+  [GetCertificateIdUseEnumType.CSMSRootCertificate]:
+    InstallCertificateUseEnumType.CSMSRootCertificate,
+  [GetCertificateIdUseEnumType.ManufacturerRootCertificate]:
+    InstallCertificateUseEnumType.ManufacturerRootCertificate,
+  [GetCertificateIdUseEnumType.MORootCertificate]: InstallCertificateUseEnumType.MORootCertificate,
+  [GetCertificateIdUseEnumType.V2GCertificateChain]:
+    InstallCertificateUseEnumType.V2GRootCertificate,
+  [GetCertificateIdUseEnumType.V2GRootCertificate]:
+    InstallCertificateUseEnumType.V2GRootCertificate,
+})
+
+// Collapses the 6 OCPP 2.0.1 SetVariables statuses onto the 4 version-agnostic
+// ConfigurationStatus values used by the local (Web UI) configuration-change seam.
+// UnknownComponent / UnknownVariable are unreachable via changeConfiguration (resolveConfigurationKeyName
+// gates unknown flat keys upstream); Record exhaustiveness is compile-enforced.
+const setVariableStatusToConfigurationStatus: Readonly<
+  Record<SetVariableStatusEnumType, ConfigurationStatus>
+> = Object.freeze({
+  [SetVariableStatusEnumType.Accepted]: ConfigurationStatus.ACCEPTED,
+  [SetVariableStatusEnumType.NotSupportedAttributeType]: ConfigurationStatus.NOT_SUPPORTED,
+  [SetVariableStatusEnumType.RebootRequired]: ConfigurationStatus.REBOOT_REQUIRED,
+  [SetVariableStatusEnumType.Rejected]: ConfigurationStatus.REJECTED,
+  [SetVariableStatusEnumType.UnknownComponent]: ConfigurationStatus.NOT_SUPPORTED,
+  [SetVariableStatusEnumType.UnknownVariable]: ConfigurationStatus.NOT_SUPPORTED,
+})
+
+interface StationInfoReportField {
+  property: 'chargePointModel' | 'chargePointSerialNumber' | 'chargePointVendor' | 'firmwareVersion'
+  variable: OCPP20DeviceInfoVariableName
+}
+
+const STATION_INFO_FIELDS_FULL: readonly StationInfoReportField[] = Object.freeze([
+  { property: 'chargePointModel', variable: OCPP20DeviceInfoVariableName.Model },
+  { property: 'chargePointVendor', variable: OCPP20DeviceInfoVariableName.VendorName },
+  { property: 'chargePointSerialNumber', variable: OCPP20DeviceInfoVariableName.SerialNumber },
+  { property: 'firmwareVersion', variable: OCPP20DeviceInfoVariableName.FirmwareVersion },
+])
+
+const STATION_INFO_FIELDS_SUMMARY: readonly StationInfoReportField[] = Object.freeze([
+  { property: 'chargePointModel', variable: OCPP20DeviceInfoVariableName.Model },
+  { property: 'chargePointVendor', variable: OCPP20DeviceInfoVariableName.VendorName },
+  { property: 'firmwareVersion', variable: OCPP20DeviceInfoVariableName.FirmwareVersion },
+])
+
+const buildStationInfoReportData = (
+  chargingStation: ChargingStation,
+  fields: readonly StationInfoReportField[]
+): ReportDataType[] => {
+  const stationInfo = chargingStation.stationInfo
+  if (stationInfo == null) {
+    return []
+  }
+  const reportData: ReportDataType[] = []
+  for (const { property, variable } of fields) {
+    const value = stationInfo[property]
+    if (value != null) {
+      reportData.push({
+        component: { name: OCPP20ComponentName.ChargingStation },
+        variable: { name: variable },
+        variableAttribute: [{ type: AttributeEnumType.Actual, value }],
+        variableCharacteristics: { dataType: DataEnumType.string, supportsMonitoring: false },
+      })
+    }
+  }
+  return reportData
+}
+
+// OCPP 2.0.1 part 2 §F01.FR.13: when a transaction exists on the Charging Station but is not yet
+// authorized (cable-plugin-first), echo its transactionId in RequestStartTransactionResponse.
+// Otherwise omit — fabricating a UUID misleads CSMS that map remoteStartId → transactionId.
+const buildRejectedResponse = (
+  reasonCode: ReasonCodeEnumType,
+  additionalInfo: string,
+  transactionId?: UUIDv4
+): OCPP20RequestStartTransactionResponse => ({
+  status: RequestStartStopStatusEnumType.Rejected,
+  statusInfo: {
+    additionalInfo,
+    reasonCode,
+  },
+  ...(transactionId != null && { transactionId }),
+})
+
+type FirmwareStage = 'download' | 'install' | 'installed'
+
+const FIRMWARE_STAGE_FAILURE_STATUS = {
+  download: OCPP20FirmwareStatusEnumType.DownloadFailed,
+  install: OCPP20FirmwareStatusEnumType.InstallationFailed,
+} as const satisfies Record<Exclude<FirmwareStage, 'installed'>, OCPP20FirmwareStatusEnumType>
+
+interface LastFirmwareStatusNotification {
+  requestId: number
+  status: OCPP20FirmwareStatusEnumType
+}
+
+interface OCPP20StationState {
+  activeFirmwareUpdateAbortController?: AbortController
+  activeFirmwareUpdateRequestId?: number
+  activeLogUploadAbortController?: AbortController
+  activeLogUploadRequestId?: number
+  activeLogUploadStatus?: UploadLogStatusEnumType
+  certSigningRetryManager?: OCPP20CertSigningRetryManager
+  isDrainingSecurityEvents: boolean
+  lastFirmwareStatusNotification?: LastFirmwareStatusNotification
+  preInoperativeConnectorStatuses: Map<string, OCPP20ConnectorStatusEnumType>
+  reportDataCache: Map<number, ReportDataType[]>
+  reportDataReservations: Map<number, ReportDataReservation>
+  securityEventQueue: QueuedSecurityEvent[]
+  /**
+   * `setTimeout` handle for the pending {@link sendQueuedSecurityEvents}
+   * retry. Stored so {@link resetStationState} can cancel it before the
+   * base template marks the entry `stopped: true`. Released by
+   * {@link cancelSecurityEventRetryTimer} on stop, re-schedule, or
+   * self-clear when the callback fires.
+   */
+  securityEventRetryTimer?: NodeJS.Timeout
+  /**
+   * `true` after {@link OCPPIncomingRequestService.stop} has released
+   * per-station resources via {@link resetStationState}. Never set from
+   * OCPP 2.0.1 code directly.
+   */
+  stopped?: boolean
+}
+
+interface PendingRemoteStartResponse {
+  readonly connectorId: number
+  readonly evseId: number
+  readonly transactionId: string
+}
+
+interface QueuedSecurityEvent {
+  retryCount?: number
+  techInfo?: string
+  timestamp: Date
+  type: string
+}
+
+interface RemoteStartConnectorTarget {
+  readonly connectorId: number
+  readonly connectorStatus: ConnectorStatus
+  readonly evseId: number
+  readonly evseStatus: EvseStatus
+}
+
+interface ReportDataReservation {
+  release: () => void
+}
+
+interface TriggeredMeterValueSample {
+  readonly connectorId?: number
+  readonly delivery?: TransactionMeterValueDelivery
+  readonly intervalBaselineKey?: string
+  readonly intervalState?: ReturnType<typeof captureTransactionIntervalState>
+  readonly meterValue: OCPP20MeterValue
+  readonly transactionId?: string
+}
+
+interface TriggeredMeterValuesDeliveryTarget {
+  delivery: TransactionMeterValueDelivery
+  evseId: number
+}
+
+interface TriggeredMeterValuesReservation {
+  readonly deliveryTargets: readonly TriggeredMeterValuesDeliveryTarget[]
+  readonly targets: readonly TriggeredMeterValuesTarget[]
+}
+
+interface TriggeredMeterValuesTarget {
+  readonly evseId: number
+  readonly samples: readonly TriggeredMeterValueSample[]
+}
+
+interface TriggeredTransactionEventTarget {
+  connectorId: number
+  evseId: number
+  reservation: TriggeredTransactionEventDeliveryReservation
+  transactionId: string
+}
+
+interface TriggerMessageConnectorTarget {
+  readonly connectorId: number
+  readonly connectorStatus: ConnectorStatus
+  readonly evseId: number
+}
+
+/**
+ * OCPP 2.0.1 incoming-request service.
+ *
+ * Extends {@link OCPPIncomingRequestService} with `OCPP20StationState` and
+ * layers OCPP 2.0.1 variable-manager cleanup on top of the base `stop()`
+ * template.
+ *
+ * A future OCPP 2.1 service SHOULD extend this class
+ * (`class OCPP21IncomingRequestService extends OCPP20IncomingRequestService`)
+ * because OCPP 2.1 is an extension of OCPP 2.0.1 with minor exceptions
+ * (`OCPP-2.1_edition1_part0_introduction.md`). Subclassing inherits
+ * `OCPP20StationState`, `resetStationState`, and the `stop()` override
+ * unchanged (subject to dynamic dispatch on `this` — TypeScript inherits
+ * methods, not textual copies).
+ *
+ * To layer 2.1-specific lifecycle logic: override `stop()` calling
+ * `super.stop()` first, or override `resetStationState` calling
+ * `super.resetStationState(state)` first. Adding new state fields
+ * requires either widening this class's generic parameter (currently
+ * fixed to `OCPP20StationState`) in a preparatory refactor — which will
+ * need an `as unknown as T` cast in `createStationState` because
+ * TypeScript cannot prove a concrete literal satisfies an arbitrary
+ * `T extends OCPP20StationState` (TS2352) — or a subclass-side
+ * narrowed accessor. Subclass override of `createStationState` is
+ * preferable when only a fixed subclass shape is needed.
+ */
+export class OCPP20IncomingRequestService extends OCPPIncomingRequestService<OCPP20StationState> {
+  protected readonly csmsName = 'CSMS'
+  protected readonly incomingRequestHandlers: Map<IncomingRequestCommand, IncomingRequestHandler>
+
+  protected readonly moduleName = moduleName
+
+  protected payloadValidatorFunctions: Map<OCPP20IncomingRequestCommand, ValidateFunction<JsonType>>
+
+  protected readonly pendingStateBlockedCommands: IncomingRequestCommand[] = [
+    OCPP20IncomingRequestCommand.REQUEST_START_TRANSACTION,
+    OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+  ]
+
+  private readonly pendingRemoteStartResponses = new WeakMap<
+    OCPP20RequestStartTransactionRequest,
+    PendingRemoteStartResponse
+  >()
+
+  private readonly pendingResetActions = new WeakMap<
+    OCPP20ResetRequest,
+    (lifecycleSignal: AbortSignal) => Promise<void> | void
+  >()
+
+  private readonly triggerMeterValuesReservations = new WeakMap<
+    OCPP20TriggerMessageRequest,
+    TriggeredMeterValuesReservation
+  >()
+
+  private readonly triggerTransactionEventReservations = new WeakMap<
+    OCPP20TriggerMessageRequest,
+    readonly TriggeredTransactionEventTarget[]
+  >()
+
+  public constructor () {
+    super(OCPPVersion.VERSION_201)
+    this.incomingRequestHandlers = new Map<IncomingRequestCommand, IncomingRequestHandler>([
+      [
+        OCPP20IncomingRequestCommand.CERTIFICATE_SIGNED,
+        this.toRequestHandler(this.handleRequestCertificateSigned.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.CHANGE_AVAILABILITY,
+        this.toRequestHandler(this.handleRequestChangeAvailability.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.CLEAR_CACHE,
+        this.toRequestHandler(this.handleRequestClearCache.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.CUSTOMER_INFORMATION,
+        this.toRequestHandler(this.handleRequestCustomerInformation.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.DATA_TRANSFER,
+        this.toRequestHandler(this.handleRequestDataTransfer.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.DELETE_CERTIFICATE,
+        this.toRequestHandler(this.handleRequestDeleteCertificate.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.GET_BASE_REPORT,
+        this.toRequestHandler(this.handleRequestGetBaseReport.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.GET_INSTALLED_CERTIFICATE_IDS,
+        this.toRequestHandler(this.handleRequestGetInstalledCertificateIds.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.GET_LOCAL_LIST_VERSION,
+        this.toRequestHandler(this.handleRequestGetLocalListVersion.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.GET_LOG,
+        this.toRequestHandler(this.handleRequestGetLog.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.GET_TRANSACTION_STATUS,
+        this.toRequestHandler(this.handleRequestGetTransactionStatus.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.GET_VARIABLES,
+        this.toRequestHandler(this.handleRequestGetVariables.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.INSTALL_CERTIFICATE,
+        this.toRequestHandler(this.handleRequestInstallCertificate.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.REQUEST_START_TRANSACTION,
+        this.toRequestHandler(this.handleRequestStartTransaction.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+        this.toRequestHandler(this.handleRequestStopTransaction.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.RESET,
+        this.toRequestHandler(this.handleRequestReset.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.SEND_LOCAL_LIST,
+        this.toRequestHandler(this.handleRequestSendLocalList.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.SET_NETWORK_PROFILE,
+        this.toRequestHandler(this.handleRequestSetNetworkProfile.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.SET_VARIABLES,
+        this.toRequestHandler(this.handleRequestSetVariables.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.TRIGGER_MESSAGE,
+        this.toRequestHandler(this.handleRequestTriggerMessage.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.UNLOCK_CONNECTOR,
+        this.toRequestHandler(this.handleRequestUnlockConnector.bind(this)),
+      ],
+      [
+        OCPP20IncomingRequestCommand.UPDATE_FIRMWARE,
+        this.toRequestHandler(this.handleRequestUpdateFirmware.bind(this)),
+      ],
+    ])
+    this.payloadValidatorFunctions = createPayloadValidatorMap(
+      OCPP20ServiceUtils.createIncomingRequestPayloadConfigs(),
+      OCPP20ServiceUtils.createPayloadOptions(moduleName, 'constructor'),
+      this.ajv
+    )
+    // Handle incoming request events
+    this.on(
+      OCPP20IncomingRequestCommand.GET_BASE_REPORT,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20GetBaseReportRequest,
+        response: OCPP20GetBaseReportResponse
+      ) => {
+        if (response.status === GenericDeviceModelStatusEnumType.Accepted) {
+          this.sendNotifyReportRequest(chargingStation, request, response).catch(
+            (error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.constructor: NotifyReport error:`,
+                error
+              )
+            }
+          )
+        }
+      }
+    )
+    this.on(
+      OCPP20IncomingRequestCommand.UPDATE_FIRMWARE,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20UpdateFirmwareRequest,
+        response: OCPP20UpdateFirmwareResponse
+      ) => {
+        if (
+          response.status === UpdateFirmwareStatusEnumType.Accepted ||
+          response.status === UpdateFirmwareStatusEnumType.AcceptedCanceled
+        ) {
+          this.simulateFirmwareUpdateLifecycle(
+            chargingStation,
+            request.requestId,
+            request.firmware,
+            request.retries,
+            request.retryInterval
+          ).catch((error: unknown) => {
+            logger.error(
+              `${chargingStation.logPrefix()} ${moduleName}.constructor: UpdateFirmware lifecycle error:`,
+              error
+            )
+          })
+        }
+      }
+    )
+    this.on(
+      OCPP20IncomingRequestCommand.GET_LOG,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20GetLogRequest,
+        response: OCPP20GetLogResponse
+      ) => {
+        if (
+          response.status === LogStatusEnumType.Accepted ||
+          response.status === LogStatusEnumType.AcceptedCanceled
+        ) {
+          this.simulateLogUploadLifecycle(chargingStation, request.requestId).catch(
+            (error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.constructor: GetLog lifecycle error:`,
+                error
+              )
+            }
+          )
+        }
+      }
+    )
+    this.on(
+      OCPP20IncomingRequestCommand.CUSTOMER_INFORMATION,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20CustomerInformationRequest,
+        response: OCPP20CustomerInformationResponse
+      ) => {
+        if (response.status === CustomerInformationStatusEnumType.Accepted && request.report) {
+          this.sendNotifyCustomerInformation(chargingStation, request.requestId).catch(
+            (error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.constructor: CustomerInformation notification error:`,
+                error
+              )
+            }
+          )
+        }
+      }
+    )
+    // E02.FR.01: Send TransactionEvent(Started) after accepting remote start
+    this.on(
+      OCPP20IncomingRequestCommand.RESET,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20ResetRequest,
+        response: OCPP20ResetResponse
+      ) => {
+        const action = this.pendingResetActions.get(request)
+        this.pendingResetActions.delete(request)
+        if (
+          (response.status !== ResetStatusEnumType.Accepted &&
+            response.status !== ResetStatusEnumType.Scheduled) ||
+          action == null
+        ) {
+          return
+        }
+        this.runOutsideIncomingRequestContext(() => {
+          const lifecycleSignal = chargingStation.lifecycleAbortSignal
+          Promise.resolve(action(lifecycleSignal)).catch((error: unknown) => {
+            logger.error(
+              `${chargingStation.logPrefix()} ${moduleName}.constructor: Reset action error:`,
+              error
+            )
+          })
+        })
+      }
+    )
+    this.on(
+      OCPP20IncomingRequestCommand.REQUEST_START_TRANSACTION,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20RequestStartTransactionRequest,
+        response: OCPP20RequestStartTransactionResponse
+      ) => {
+        const pending = this.pendingRemoteStartResponses.get(request)
+        this.pendingRemoteStartResponses.delete(request)
+        const txId = response.transactionId
+        if (
+          response.status === RequestStartStopStatusEnumType.Accepted &&
+          txId != null &&
+          pending?.transactionId === txId
+        ) {
+          const { connectorId, evseId } = pending
+          const connectorStatus = chargingStation.getConnectorStatus(connectorId, evseId)
+          if (
+            connectorStatus?.transactionId?.toString() === txId &&
+            connectorStatus.transactionPending === true &&
+            connectorStatus.transactionStarting !== true &&
+            connectorStatus.transactionStarted !== true &&
+            !isTransactionEnding(connectorStatus)
+          ) {
+            chargingStation.createCoherentSession(txId, connectorId, evseId)
+            const startedMeterValues = OCPP20ServiceUtils.buildTransactionStartedMeterValues(
+              chargingStation,
+              txId,
+              connectorId,
+              evseId
+            )
+            OCPP20ServiceUtils.sendTransactionEvent(
+              chargingStation,
+              OCPP20TransactionEventEnumType.Started,
+              OCPP20TriggerReasonEnumType.RemoteStart,
+              connectorId,
+              txId,
+              {
+                evseId,
+                ...(isNotEmptyArray(startedMeterValues) && { meterValue: startedMeterValues }),
+                remoteStartId: request.remoteStartId,
+              },
+              undefined,
+              undefined,
+              'pending'
+            ).catch((error: unknown) => {
+              // Session was created for this fire-and-forget send. If the
+              // send rejects, destroy it here — no other cleanup path
+              // covers this branch. `destroyCoherentSession` is idempotent.
+              chargingStation.destroyCoherentSession(txId)
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.constructor: TransactionEvent(Started) error:`,
+                error
+              )
+            })
+          }
+        }
+      }
+    )
+    this.on(
+      OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20RequestStopTransactionRequest,
+        response: OCPP20RequestStopTransactionResponse
+      ) => {
+        if (response.status === RequestStartStopStatusEnumType.Accepted) {
+          const connectorId = chargingStation.getConnectorIdByTransactionId(request.transactionId)
+          const evseId = chargingStation.getEvseIdByTransactionId(request.transactionId)
+          if (connectorId != null && evseId != null) {
+            OCPP20ServiceUtils.requestStopTransaction(
+              chargingStation,
+              connectorId,
+              evseId,
+              undefined,
+              undefined,
+              request.transactionId
+            ).catch((error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.constructor: RequestStopTransaction error:`,
+                error
+              )
+            })
+          }
+        }
+      }
+    )
+    this.on(
+      OCPP20IncomingRequestCommand.TRIGGER_MESSAGE,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP20TriggerMessageRequest,
+        response: OCPP20TriggerMessageResponse
+      ) => {
+        if (response.status !== TriggerMessageStatusEnumType.Accepted) {
+          return
+        }
+        const { evse, requestedMessage } = request
+        const errorHandler = (error: unknown): void => {
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.constructor: Trigger ${requestedMessage} error:`,
+            error
+          )
+        }
+        switch (requestedMessage) {
+          case MessageTriggerEnumType.BootNotification:
+            chargingStation.ocppRequestService
+              .requestHandler<OCPP20BootNotificationRequest, OCPP20BootNotificationResponse>(
+                chargingStation,
+                OCPP20RequestCommand.BOOT_NOTIFICATION,
+                chargingStation.bootNotificationRequest as OCPP20BootNotificationRequest,
+                { skipBufferingOnError: true, triggerMessage: true }
+              )
+              .catch(errorHandler)
+            break
+          case MessageTriggerEnumType.FirmwareStatusNotification: {
+            // L01.FR.25 & L02.FR.16 — last-sent = Installed → { status: Idle }.
+            // L01.FR.26 & L02.FR.17 — last-sent ≠ Installed → { requestId, status: <last-sent> }.
+            // L01.FR.20 & L02.FR.14 — requestId mandatory unless status = Idle.
+            // Fresh station (no notification ever sent): Idle (spec-silent precondition,
+            // consistent with FirmwareStatusEnumType.Idle §3.33 "trigger-only" restriction).
+            const lastSent = this.getStationState(chargingStation)?.lastFirmwareStatusNotification
+            const payload: OCPP20FirmwareStatusNotificationRequest =
+              lastSent == null || lastSent.status === OCPP20FirmwareStatusEnumType.Installed
+                ? { status: OCPP20FirmwareStatusEnumType.Idle }
+                : { requestId: lastSent.requestId, status: lastSent.status }
+            chargingStation.ocppRequestService
+              .requestHandler<
+                OCPP20FirmwareStatusNotificationRequest,
+                OCPP20FirmwareStatusNotificationResponse
+              >(chargingStation, OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION, payload, {
+                skipBufferingOnError: true,
+                triggerMessage: true,
+              })
+              .catch(errorHandler)
+            break
+          }
+          case MessageTriggerEnumType.Heartbeat:
+            chargingStation.ocppRequestService
+              .requestHandler<OCPP20HeartbeatRequest, OCPP20HeartbeatResponse>(
+                chargingStation,
+                OCPP20RequestCommand.HEARTBEAT,
+                OCPP20Constants.OCPP_RESPONSE_EMPTY as OCPP20HeartbeatRequest,
+                { skipBufferingOnError: true, triggerMessage: true }
+              )
+              .catch(errorHandler)
+            break
+          case MessageTriggerEnumType.LogStatusNotification: {
+            const stationState = this.getStationState(chargingStation)
+            const requestId = stationState?.activeLogUploadRequestId
+            const logStatus =
+              requestId != null
+                ? (stationState?.activeLogUploadStatus ?? UploadLogStatusEnumType.Uploading)
+                : UploadLogStatusEnumType.Idle
+            chargingStation.ocppRequestService
+              .requestHandler<
+                OCPP20LogStatusNotificationRequest,
+                OCPP20LogStatusNotificationResponse
+              >(
+                chargingStation,
+                OCPP20RequestCommand.LOG_STATUS_NOTIFICATION,
+                { requestId, status: logStatus },
+                { skipBufferingOnError: true, triggerMessage: true }
+              )
+              .catch(errorHandler)
+            break
+          }
+          case MessageTriggerEnumType.MeterValues: {
+            const reservation = this.triggerMeterValuesReservations.get(request)
+            this.triggerMeterValuesReservations.delete(request)
+            if (reservation != null) {
+              this.triggerMeterValues(chargingStation, reservation, errorHandler)
+            }
+            break
+          }
+          case MessageTriggerEnumType.StatusNotification:
+            this.triggerStatusNotification(chargingStation, evse, errorHandler)
+            break
+          case MessageTriggerEnumType.TransactionEvent: {
+            const reservedTargets = this.triggerTransactionEventReservations.get(request)
+            this.triggerTransactionEventReservations.delete(request)
+            if (reservedTargets != null) {
+              for (const target of reservedTargets) {
+                target.reservation
+                  .run(() => this.triggerTransactionEvent(chargingStation, target))
+                  .catch(errorHandler)
+              }
+            }
+            break
+          }
+        }
+      }
+    )
+  }
+
+  /**
+   * Applies a Web UI configuration change: resolves the flat key to its registry tuple and
+   * reuses the SetVariables handler internally, never emitting a SetVariablesRequest to a CSMS.
+   *
+   * The resolved `instance` is placed on the component slot; internal resolution reads
+   * `variable.instance ?? component.instance`, so the round-trip is slot-agnostic. This is only
+   * correct because nothing is emitted on the wire — a future wire-originating path must move a
+   * variableInstance to `variable.instance` for OCPP 2.0.1 conformance.
+   * @param chargingStation - Target charging station.
+   * @param key - Persisted flat configuration key name.
+   * @param value - New value to set.
+   * @returns The resulting configuration status.
+   */
+  public changeConfiguration (
+    chargingStation: ChargingStation,
+    key: string,
+    value: string
+  ): ConfigurationStatus {
+    const resolved = OCPP20VariableManager.getInstance().resolveConfigurationKeyName(key)
+    if (resolved == null) {
+      return ConfigurationStatus.NOT_SUPPORTED
+    }
+    const { component, evseId, instance, variable } = resolved
+    const response = this.handleRequestSetVariables(chargingStation, {
+      setVariableData: [
+        {
+          attributeType: AttributeEnumType.Actual,
+          attributeValue: value,
+          component: {
+            name: component,
+            ...(evseId != null && { evse: { id: evseId } }),
+            ...(instance != null && { instance }),
+          },
+          variable: { name: variable },
+        },
+      ],
+    })
+    if (isEmpty(response.setVariableResult)) {
+      return ConfigurationStatus.REJECTED
+    }
+    return setVariableStatusToConfigurationStatus[response.setVariableResult[0].attributeStatus]
+  }
+
+  /**
+   * Returns the cert-signing retry manager for the given station,
+   * lazily creating it on first access.
+   * @param chargingStation - Target charging station.
+   * @returns The retry manager, or `undefined` when the station has
+   *   been stopped so callers must optional-chain the result.
+   */
+  public getCertSigningRetryManager (
+    chargingStation: ChargingStation
+  ): OCPP20CertSigningRetryManager | undefined {
+    // Return undefined when the state is sealed stopped: a
+    // fresh manager would schedule a non-`.unref()`'d retry
+    // `setTimeout` holding the ChargingStation reference. Callers
+    // must optional-chain the return.
+    const stationState = this.getOrCreateStationState(chargingStation)
+    if (stationState.stopped === true) {
+      return undefined
+    }
+    stationState.certSigningRetryManager ??= new OCPP20CertSigningRetryManager(chargingStation)
+    return stationState.certSigningRetryManager
+  }
+
+  /**
+   * Handle OCPP 2.0.1 GetVariables request from the CSMS.
+   * @param chargingStation - Target charging station
+   * @param commandPayload - GetVariables request payload
+   * @returns GetVariables response with variable results
+   */
+  public handleRequestGetVariables (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20GetVariablesRequest
+  ): OCPP20GetVariablesResponse {
+    const getVariablesResponse: OCPP20GetVariablesResponse = {
+      getVariableResult: [],
+    }
+
+    const variableManager = OCPP20VariableManager.getInstance()
+
+    const { bytesLimit: enforceBytesLimit, itemsLimit: enforceItemsLimit } =
+      OCPP20ServiceUtils.readMessageLimits(chargingStation)
+
+    const variableData = commandPayload.getVariableData
+    const preEnforcement = OCPP20ServiceUtils.enforceMessageLimits(
+      chargingStation,
+      moduleName,
+      'handleRequestGetVariables',
+      variableData,
+      enforceItemsLimit,
+      enforceBytesLimit,
+      (v, reason) => ({
+        attributeStatus: GetVariableStatusEnumType.Rejected,
+        attributeStatusInfo: {
+          additionalInfo: reason.additionalInfo,
+          reasonCode: reason.reasonCode,
+        },
+        attributeType: v.attributeType,
+        component: v.component,
+        variable: v.variable,
+      }),
+      logger
+    )
+    if (preEnforcement.rejected) {
+      getVariablesResponse.getVariableResult = preEnforcement.results
+      return getVariablesResponse
+    }
+
+    const results = variableManager.getVariables(chargingStation, variableData)
+    getVariablesResponse.getVariableResult = results
+
+    getVariablesResponse.getVariableResult = OCPP20ServiceUtils.enforcePostCalculationBytesLimit(
+      chargingStation,
+      moduleName,
+      'handleRequestGetVariables',
+      variableData,
+      results,
+      enforceBytesLimit,
+      (v, reason) => ({
+        attributeStatus: GetVariableStatusEnumType.Rejected,
+        attributeStatusInfo: {
+          additionalInfo: reason.additionalInfo,
+          reasonCode: reason.reasonCode,
+        },
+        attributeType: v.attributeType,
+        component: v.component,
+        variable: v.variable,
+      }),
+      logger
+    )
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetVariables: Processed ${commandPayload.getVariableData.length.toString()} variable requests, returning ${results.length.toString()} results`
+    )
+
+    return getVariablesResponse
+  }
+
+  /**
+   * Handle OCPP 2.0.1 SetVariables request from the CSMS.
+   * @param chargingStation - Target charging station
+   * @param commandPayload - SetVariables request payload
+   * @returns SetVariables response with variable results
+   */
+  public handleRequestSetVariables (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20SetVariablesRequest
+  ): OCPP20SetVariablesResponse {
+    const setVariablesResponse: OCPP20SetVariablesResponse = {
+      setVariableResult: [],
+    }
+
+    const { bytesLimit: enforceBytesLimit, itemsLimit: enforceItemsLimit } =
+      OCPP20ServiceUtils.readMessageLimits(chargingStation)
+
+    const variableManager = OCPP20VariableManager.getInstance()
+
+    const variableData = commandPayload.setVariableData
+    const preEnforcement = OCPP20ServiceUtils.enforceMessageLimits(
+      chargingStation,
+      moduleName,
+      'handleRequestSetVariables',
+      variableData,
+      enforceItemsLimit,
+      enforceBytesLimit,
+      (v, reason) => ({
+        attributeStatus: SetVariableStatusEnumType.Rejected,
+        attributeStatusInfo: {
+          additionalInfo: reason.additionalInfo,
+          reasonCode: reason.reasonCode,
+        },
+        attributeType: v.attributeType ?? AttributeEnumType.Actual,
+        component: v.component,
+        variable: v.variable,
+      }),
+      logger
+    )
+    if (preEnforcement.rejected) {
+      setVariablesResponse.setVariableResult = preEnforcement.results
+      return setVariablesResponse
+    }
+
+    const results = variableManager.setVariables(chargingStation, variableData)
+    setVariablesResponse.setVariableResult = OCPP20ServiceUtils.enforcePostCalculationBytesLimit(
+      chargingStation,
+      moduleName,
+      'handleRequestSetVariables',
+      variableData,
+      results,
+      enforceBytesLimit,
+      (v, reason) => ({
+        attributeStatus: SetVariableStatusEnumType.Rejected,
+        attributeStatusInfo: {
+          additionalInfo: reason.additionalInfo,
+          reasonCode: reason.reasonCode,
+        },
+        attributeType: v.attributeType ?? AttributeEnumType.Actual,
+        component: v.component,
+        variable: v.variable,
+      }),
+      logger
+    )
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetVariables: Processed ${commandPayload.setVariableData.length.toString()} variable requests, returning ${results.length.toString()} results`
+    )
+
+    return setVariablesResponse
+  }
+
+  /**
+   * Stop and clean up per-station state.
+   *
+   * Extends the base template with OCPP 2.0.1 variable-manager cleanup,
+   * which runs unconditionally to match pre-refactor behavior even when
+   * no {@link stationsState} entry exists.
+   *
+   * If `super.stop()` throws (via `resetStationState`), the
+   * variable-manager cleanup below is skipped — matches the pre-refactor
+   * semantics where the state-reset block was also outside the try/catch.
+   * @param chargingStation - Target charging station to stop
+   */
+  public override stop (chargingStation: ChargingStation): void {
+    super.stop(chargingStation)
+    OCPP20ServiceUtils.cancelClockAlignedMeterValuesRequests(chargingStation)
+    try {
+      const variableManager = OCPP20VariableManager.getInstance()
+      const stationId = chargingStation.stationInfo?.hashId
+      variableManager.resetRuntimeOverrides(stationId)
+      variableManager.invalidateMappingsCache(stationId)
+      logger.debug(`${chargingStation.logPrefix()} ${moduleName}.stop: Per-station state cleared`)
+    } catch (error) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.stop: Error clearing per-station state:`,
+        error
+      )
+    }
+  }
+
+  /**
+   * @param commandName - Delivered incoming command
+   * @returns Whether the response callback remains admissible during shutdown
+   */
+  protected override canDispatchResponseWhileStopping (
+    commandName: IncomingRequestCommand
+  ): boolean {
+    return commandName === OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION
+  }
+
+  /**
+   * @returns A fresh `OCPP20StationState` with required collections initialized;
+   *   optional lifecycle-owned fields start absent and are assigned lazily by handlers.
+   */
+  protected override createStationState (): OCPP20StationState {
+    return {
+      isDrainingSecurityEvents: false,
+      preInoperativeConnectorStatuses: new Map(),
+      reportDataCache: new Map(),
+      reportDataReservations: new Map(),
+      securityEventQueue: [],
+    }
+  }
+
+  /**
+   * Measures exact trigger snapshots retained by response delivery callbacks.
+   * @param commandName - Incoming command associated with the response.
+   * @param commandPayload - Exact incoming request payload owning the reservation.
+   * @returns Serialized bytes retained by trigger reservations.
+   */
+  protected override getResponseDeliveryRetainedBytes (
+    commandName: IncomingRequestCommand,
+    commandPayload: JsonType
+  ): number {
+    if (commandName !== OCPP20IncomingRequestCommand.TRIGGER_MESSAGE) return 0
+    const request = commandPayload as OCPP20TriggerMessageRequest
+    const meterValues = this.triggerMeterValuesReservations.get(request)?.targets.map(target => ({
+      evseId: target.evseId,
+      meterValue: target.samples.map(sample => sample.meterValue),
+    }))
+    const transactionEvents = this.triggerTransactionEventReservations
+      .get(request)
+      ?.map(({ connectorId, evseId, transactionId }) => ({ connectorId, evseId, transactionId }))
+    return Buffer.byteLength(JSON.stringify([meterValues, transactionEvents]), 'utf8')
+  }
+
+  /**
+   * Handles OCPP 2.0.1 ClearCache request by clearing the Authorization Cache
+   * per OCPP 2.0.1 spec C11.FR.01
+   * Per C11.FR.04: Returns Rejected if AuthCacheEnabled is false
+   * @param chargingStation - The charging station instance
+   * @returns Promise resolving to ClearCacheResponse
+   */
+  protected handleRequestClearCache (chargingStation: ChargingStation): OCPP20ClearCacheResponse {
+    try {
+      const authService = OCPPAuthServiceFactory.getInstance(chargingStation)
+      // C11.FR.04: IF AuthCacheEnabled is false, CS SHALL send ClearCacheResponse with status Rejected
+      const config = authService.getConfiguration()
+      if (!config.authorizationCacheEnabled) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearCache: Authorization cache disabled, returning Rejected`
+        )
+        return OCPP20Constants.OCPP_RESPONSE_REJECTED
+      }
+      authService.clearCache()
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearCache: Authorization cache cleared`
+      )
+      return OCPP20Constants.OCPP_RESPONSE_ACCEPTED
+    } catch (error) {
+      const errorResponse: OCPP20ClearCacheResponse = OCPP20Constants.OCPP_RESPONSE_REJECTED
+      return (
+        handleIncomingRequestError<OCPP20ClearCacheResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.CLEAR_CACHE,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 GetLocalListVersion request.
+   * Returns the current version number of the local authorization list.
+   * Per D01.FR.03: Returns 0 when local auth list is not enabled or not available.
+   * @param chargingStation - The charging station instance
+   * @returns GetLocalListVersionResponse
+   */
+  protected handleRequestGetLocalListVersion (
+    chargingStation: ChargingStation
+  ): OCPP20GetLocalListVersionResponse {
+    try {
+      if (!chargingStation.getLocalAuthListEnabled()) {
+        return { versionNumber: 0 }
+      }
+      const authService = OCPPAuthServiceFactory.getInstance(chargingStation)
+      const manager = authService.getLocalAuthListManager()
+      if (manager == null) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetLocalListVersion: No local auth list manager, returning version 0`
+        )
+        return { versionNumber: 0 }
+      }
+      const version = manager.getVersion()
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetLocalListVersion: Returning version ${version.toString()}`
+      )
+      return { versionNumber: version }
+    } catch (error) {
+      const errorResponse: OCPP20GetLocalListVersionResponse = { versionNumber: 0 }
+      return (
+        handleIncomingRequestError<OCPP20GetLocalListVersionResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.GET_LOCAL_LIST_VERSION,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 SendLocalList request.
+   * Applies full or differential updates to the local authorization list.
+   * Per D02.FR.01: Returns Failed if LocalAuthListCtrlr is not enabled.
+   * @param chargingStation - The charging station instance
+   * @param commandPayload - SendLocalList request payload
+   * @returns SendLocalListResponse
+   */
+  protected handleRequestSendLocalList (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20SendLocalListRequest
+  ): OCPP20SendLocalListResponse {
+    try {
+      const authService = OCPPAuthServiceFactory.getInstance(chargingStation)
+      if (!chargingStation.getLocalAuthListEnabled()) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestSendLocalList: Local auth list disabled, returning Failed`
+        )
+        return {
+          status: OCPP20SendLocalListStatusEnumType.Failed,
+          statusInfo: { reasonCode: ReasonCodeEnumType.NotEnabled },
+        }
+      }
+      const manager = authService.getLocalAuthListManager()
+      if (manager == null) {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestSendLocalList: No local auth list manager available`
+        )
+        return {
+          status: OCPP20SendLocalListStatusEnumType.Failed,
+          statusInfo: {
+            additionalInfo: 'Local auth list manager unavailable',
+            reasonCode: ReasonCodeEnumType.InternalError,
+          },
+        }
+      }
+      if (commandPayload.versionNumber <= 0) {
+        return OCPP20Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED
+      }
+
+      const { localAuthorizationList, updateType, versionNumber } = commandPayload
+
+      const itemsPerMessageKey = getConfigurationKey(
+        chargingStation,
+        buildConfigKey(
+          OCPP20ComponentName.LocalAuthListCtrlr,
+          OCPP20RequiredVariableName.ItemsPerMessage
+        )
+      )
+      if (itemsPerMessageKey?.value != null) {
+        const itemsPerMessage = convertToIntOrNaN(itemsPerMessageKey.value)
+        if (
+          Number.isInteger(itemsPerMessage) &&
+          itemsPerMessage > 0 &&
+          localAuthorizationList != null &&
+          localAuthorizationList.length > itemsPerMessage
+        ) {
+          return OCPP20Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED
+        }
+      }
+
+      if (updateType === OCPP20UpdateEnumType.Full) {
+        const entries: LocalAuthEntry[] = (localAuthorizationList ?? []).map(item => ({
+          expiryDate:
+            item.idTokenInfo?.cacheExpiryDateTime != null
+              ? convertToDate(item.idTokenInfo.cacheExpiryDateTime)
+              : undefined,
+          identifier: item.idToken.idToken,
+          metadata: { idTokenType: item.idToken.type },
+          status: item.idTokenInfo?.status ?? OCPP20AuthorizationStatusEnumType.Invalid,
+        }))
+        manager.setEntries(entries, versionNumber)
+      } else {
+        // D02.FR.08: For differential updates, version must be greater than current
+        const currentVersion = manager.getVersion()
+        if (versionNumber <= currentVersion) {
+          return OCPP20Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_VERSION_MISMATCH
+        }
+        const diffEntries: DifferentialAuthEntry[] = (localAuthorizationList ?? []).map(item => ({
+          expiryDate:
+            item.idTokenInfo?.cacheExpiryDateTime != null
+              ? convertToDate(item.idTokenInfo.cacheExpiryDateTime)
+              : undefined,
+          identifier: item.idToken.idToken,
+          metadata: { idTokenType: item.idToken.type },
+          status: item.idTokenInfo?.status,
+        }))
+        manager.applyDifferentialUpdate(diffEntries, versionNumber)
+      }
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestSendLocalList: Local auth list updated (${updateType}), version=${versionNumber.toString()}`
+      )
+      addConfigurationKey(
+        chargingStation,
+        buildConfigKey(OCPP20ComponentName.LocalAuthListCtrlr, OCPP20RequiredVariableName.Entries),
+        manager.getAllEntries().length.toString(),
+        { readonly: true },
+        { overwrite: true, save: false }
+      )
+      return OCPP20Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_ACCEPTED
+    } catch (error) {
+      const errorResponse: OCPP20SendLocalListResponse =
+        OCPP20Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED
+      return (
+        handleIncomingRequestError<OCPP20SendLocalListResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.SEND_LOCAL_LIST,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Check whether an incoming request command is supported by the charging station.
+   * @param chargingStation - Target charging station
+   * @param commandName - Incoming request command to check
+   * @returns Whether the command is supported
+   */
+  protected isIncomingRequestCommandSupported (
+    chargingStation: ChargingStation,
+    commandName: IncomingRequestCommand
+  ): boolean {
+    return isIncomingRequestCommandSupported(chargingStation, commandName)
+  }
+
+  protected override async onResponseSendError (
+    chargingStation: ChargingStation,
+    commandName: IncomingRequestCommand,
+    commandPayload: JsonType
+  ): Promise<void> {
+    if (commandName === OCPP20IncomingRequestCommand.RESET) {
+      this.pendingResetActions.delete(commandPayload as OCPP20ResetRequest)
+      return
+    }
+    if (commandName === OCPP20IncomingRequestCommand.GET_BASE_REPORT) {
+      const request = commandPayload as OCPP20GetBaseReportRequest
+      const stationState = this.getStationState(chargingStation)
+      if (stationState != null) {
+        this.releaseReportDataReservation(chargingStation, stationState, request.requestId)
+      }
+      return
+    }
+    if (commandName === OCPP20IncomingRequestCommand.REQUEST_START_TRANSACTION) {
+      const request = commandPayload as OCPP20RequestStartTransactionRequest
+      const pending = this.pendingRemoteStartResponses.get(request)
+      this.pendingRemoteStartResponses.delete(request)
+      if (pending == null) return
+      const connectorStatus = chargingStation.getConnectorStatus(
+        pending.connectorId,
+        pending.evseId
+      )
+      if (
+        connectorStatus?.transactionPending !== true ||
+        connectorStatus.transactionId?.toString() !== pending.transactionId
+      ) {
+        return
+      }
+      try {
+        await this.resetConnectorOnStartTransactionError(
+          chargingStation,
+          pending.connectorId,
+          pending.evseId,
+          pending.transactionId
+        )
+      } catch (error: unknown) {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.onResponseSendError: Failed to roll back RequestStartTransaction state:`,
+          error
+        )
+      }
+      return
+    }
+    if (commandName !== OCPP20IncomingRequestCommand.TRIGGER_MESSAGE) return
+    const request = commandPayload as OCPP20TriggerMessageRequest
+    const meterValuesReservation = this.triggerMeterValuesReservations.get(request)
+    if (meterValuesReservation != null) {
+      this.triggerMeterValuesReservations.delete(request)
+      OCPP20ServiceUtils.releaseTriggeredMeterValuesRequests(
+        chargingStation,
+        meterValuesReservation.targets.map(target => target.evseId)
+      )
+      for (const { delivery } of meterValuesReservation.deliveryTargets) delivery.settle(true)
+    }
+    const reservedTransactionTargets = this.triggerTransactionEventReservations.get(request)
+    if (reservedTransactionTargets != null) {
+      this.triggerTransactionEventReservations.delete(request)
+      for (const { reservation } of reservedTransactionTargets) reservation.release()
+    }
+  }
+
+  /**
+   * Reset per-station lifecycle state prior to the base template
+   * marking the entry `stopped: true`.
+   *
+   * ORDERING INVARIANT (preserved bit-for-bit from the pre-refactor
+   * `stop()` body): abort in-flight signals BEFORE clearing the fields
+   * that hold their controllers (otherwise the subsequent `?.abort()`
+   * short-circuits on the nulled field and the in-flight operation is
+   * never signaled to cancel), and cancel the retry timers BEFORE the
+   * base template marks the entry `stopped: true`.
+   * @param stationState - Per-station state to reset.
+   */
+  protected override resetStationState (stationState: OCPP20StationState): void {
+    stationState.activeFirmwareUpdateAbortController?.abort()
+    stationState.activeLogUploadAbortController?.abort()
+    stationState.certSigningRetryManager?.cancelRetryTimer()
+    this.cancelSecurityEventRetryTimer(stationState)
+    for (const reservation of stationState.reportDataReservations.values()) {
+      reservation.release()
+    }
+    stationState.reportDataReservations.clear()
+    stationState.reportDataCache.clear()
+    this.resetActiveFirmwareUpdateState(stationState)
+    this.resetActiveLogUploadState(stationState)
+  }
+
+  private async authorizeToken (
+    chargingStation: ChargingStation,
+    connectorId: number,
+    tokenValue: string,
+    tokenLabel: string,
+    ocpp20TokenType: OCPP20IdTokenEnumType,
+    context?: AuthContext
+  ): Promise<boolean> {
+    const authService = OCPPAuthServiceFactory.getInstance(chargingStation)
+    const authResult = await authService.authorize({
+      allowOffline: false,
+      connectorId,
+      context: context ?? AuthContext.REMOTE_START,
+      identifier: {
+        type: mapOCPP20TokenType(ocpp20TokenType),
+        value: tokenValue,
+      },
+      timestamp: new Date(),
+    })
+
+    if (authResult.status !== AuthResultStatus.ACCEPTED) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.authorizeToken: ${tokenLabel} '${truncateId(tokenValue)}' is not authorized`
+      )
+    }
+
+    return authResult.status === AuthResultStatus.ACCEPTED
+  }
+
+  private buildIdleTriggeredMeterValue (
+    chargingStation: ChargingStation,
+    evseId: number,
+    evseStatus: EvseStatus,
+    alignedMeasurandsKey: string,
+    timestamp: Date,
+    connectorId?: number
+  ): OCPP20MeterValue | undefined {
+    const resolvedConnectorId = connectorId ?? evseStatus.connectors.keys().next().value
+    if (resolvedConnectorId == null) return
+    const connectorStatus = evseStatus.connectors.get(resolvedConnectorId)
+    if (connectorStatus == null) return
+    const energyRegisterWhOverride =
+      connectorId == null
+        ? [...evseStatus.connectors.values()].reduce(
+            (total, status) => total + Math.max(0, status.energyActiveImportRegisterValue ?? 0),
+            0
+          )
+        : Math.max(0, connectorStatus.energyActiveImportRegisterValue ?? 0)
+    try {
+      const meterValue = buildClockAlignedConnectorMeterValue(
+        chargingStation,
+        {
+          advanceEnergy: false,
+          commitState: false,
+          connectorId: resolvedConnectorId,
+          energyRegisterWhOverride,
+          evseId,
+          idle: true,
+          timestamp,
+        },
+        0,
+        alignedMeasurandsKey,
+        OCPP20ReadingContextEnumType.TRIGGER
+      )
+      return isNotEmptyArray(meterValue.sampledValue) ? meterValue : undefined
+    } catch (error) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.buildIdleTriggeredMeterValue: ${getErrorMessage(error)}`
+      )
+      return undefined
+    }
+  }
+
+  private buildReportData (
+    chargingStation: ChargingStation,
+    reportBase: ReportBaseEnumType
+  ): ReportDataType[] {
+    if (!Object.values(ReportBaseEnumType).includes(reportBase)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.buildReportData: Invalid reportBase '${reportBase}'`
+      )
+      return []
+    }
+
+    const reportData: ReportDataType[] = []
+
+    switch (reportBase) {
+      case ReportBaseEnumType.ConfigurationInventory: {
+        const variableManager = OCPP20VariableManager.getInstance()
+        if (chargingStation.ocppConfiguration?.configurationKey) {
+          for (const configKey of chargingStation.ocppConfiguration.configurationKey) {
+            const resolved = variableManager.resolveConfigurationKeyName(configKey.key)
+            const metadata =
+              resolved == null
+                ? undefined
+                : getVariableMetadata(resolved.component, resolved.variable, resolved.instance)
+            reportData.push({
+              component:
+                resolved == null
+                  ? { name: OCPP20ComponentName.OCPPCommCtrlr }
+                  : {
+                      name: resolved.component,
+                      ...(resolved.evseId != null && { evse: { id: resolved.evseId } }),
+                    },
+              variable:
+                resolved == null
+                  ? { name: configKey.key }
+                  : {
+                      name: resolved.variable,
+                      ...(resolved.instance != null && { instance: resolved.instance }),
+                    },
+              variableAttribute: [
+                {
+                  type: AttributeEnumType.Actual,
+                  value: configKey.value,
+                },
+              ],
+              variableCharacteristics: {
+                dataType: metadata?.dataType ?? DataEnumType.string,
+                supportsMonitoring: false,
+              },
+            })
+          }
+        }
+        break
+      }
+
+      case ReportBaseEnumType.FullInventory: {
+        reportData.push(...buildStationInfoReportData(chargingStation, STATION_INFO_FIELDS_FULL))
+        const variableManager = OCPP20VariableManager.getInstance()
+
+        if (chargingStation.ocppConfiguration?.configurationKey) {
+          for (const configKey of chargingStation.ocppConfiguration.configurationKey) {
+            if (variableManager.resolveConfigurationKeyName(configKey.key) != null) continue
+            const variableAttributes = []
+            variableAttributes.push({
+              type: AttributeEnumType.Actual,
+              value: configKey.value,
+            })
+
+            reportData.push({
+              component: { name: OCPP20ComponentName.OCPPCommCtrlr },
+              variable: { name: configKey.key },
+              variableAttribute: variableAttributes,
+              variableCharacteristics: {
+                dataType: DataEnumType.string,
+                supportsMonitoring: false,
+              },
+            })
+          }
+        }
+
+        try {
+          const getVariableData: OCPP20GetVariablesRequest['getVariableData'] = []
+          for (const variableMetadata of Object.values(VARIABLE_REGISTRY)) {
+            const variableDescriptor: { instance?: string; name: string } = {
+              name: variableMetadata.variable,
+            }
+            if (variableMetadata.instance) {
+              variableDescriptor.instance = variableMetadata.instance
+            }
+            for (const component of variableManager.getSupportedComponents(
+              chargingStation,
+              variableMetadata
+            )) {
+              getVariableData.push({
+                attributeType: AttributeEnumType.Actual,
+                component,
+                variable: variableDescriptor,
+              })
+              if (variableMetadata.supportedAttributes.includes(AttributeEnumType.MinSet)) {
+                getVariableData.push({
+                  attributeType: AttributeEnumType.MinSet,
+                  component,
+                  variable: variableDescriptor,
+                })
+              }
+              if (variableMetadata.supportedAttributes.includes(AttributeEnumType.MaxSet)) {
+                getVariableData.push({
+                  attributeType: AttributeEnumType.MaxSet,
+                  component,
+                  variable: variableDescriptor,
+                })
+              }
+            }
+          }
+          const getResults = variableManager.getVariables(chargingStation, getVariableData)
+          const grouped = new Map<
+            string,
+            {
+              attributes: { type: AttributeEnumType; value?: string }[]
+              component: ReportDataType['component']
+              dataType: DataEnumType
+              variable: ReportDataType['variable']
+            }
+          >()
+          for (const r of getResults) {
+            const key = JSON.stringify([r.component, r.variable])
+            const variableMetadata = getVariableMetadata(
+              r.component.name,
+              r.variable.name,
+              r.variable.instance
+            )
+            if (!variableMetadata) continue
+            if (!grouped.has(key)) {
+              grouped.set(key, {
+                attributes: [],
+                component: r.component,
+                dataType: variableMetadata.dataType,
+                variable: r.variable,
+              })
+            }
+            if (r.attributeStatus === GetVariableStatusEnumType.Accepted) {
+              const variableGroupEntry = grouped.get(key)
+              if (variableGroupEntry) {
+                variableGroupEntry.attributes.push({
+                  type: r.attributeType ?? AttributeEnumType.Actual,
+                  value: r.attributeValue,
+                })
+              }
+            }
+          }
+          for (const entry of grouped.values()) {
+            entry.attributes.sort((a, b) => {
+              const order = [
+                AttributeEnumType.Actual,
+                AttributeEnumType.MinSet,
+                AttributeEnumType.MaxSet,
+              ]
+              return order.indexOf(a.type) - order.indexOf(b.type)
+            })
+            if (isNotEmptyArray(entry.attributes)) {
+              reportData.push({
+                component: entry.component,
+                variable: entry.variable,
+                variableAttribute: entry.attributes,
+                variableCharacteristics: { dataType: entry.dataType, supportsMonitoring: false },
+              })
+            }
+          }
+        } catch (error) {
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.buildReportData: Error enriching FullInventory with registry variables:`,
+            error
+          )
+        }
+
+        if (chargingStation.hasEvses) {
+          for (const { evseId, evseStatus } of chargingStation.iterateEvses()) {
+            reportData.push({
+              component: {
+                evse: { id: evseId },
+                name: OCPP20ComponentName.EVSE,
+              },
+              variable: { name: OCPP20DeviceInfoVariableName.AvailabilityState },
+              variableAttribute: [
+                { type: AttributeEnumType.Actual, value: evseStatus.availability },
+              ],
+              variableCharacteristics: { dataType: DataEnumType.string, supportsMonitoring: true },
+            })
+          }
+        }
+        for (const {
+          connectorId,
+          connectorStatus,
+          evseId,
+        } of chargingStation.iterateConnectors()) {
+          if (evseId == null && connectorId === 0) continue
+          reportData.push({
+            component: {
+              evse: { connectorId, id: evseId ?? 1 },
+              name: evseId != null ? OCPP20ComponentName.EVSE : OCPP20ComponentName.Connector,
+            },
+            variable: { name: OCPP20DeviceInfoVariableName.ConnectorType },
+            variableAttribute: [
+              {
+                type: AttributeEnumType.Actual,
+                value: connectorStatus.type ?? ConnectorEnumType.Unknown,
+              },
+            ],
+            variableCharacteristics: {
+              dataType: DataEnumType.string,
+              supportsMonitoring: false,
+            },
+          })
+        }
+        break
+      }
+
+      case ReportBaseEnumType.SummaryInventory:
+        reportData.push(...buildStationInfoReportData(chargingStation, STATION_INFO_FIELDS_SUMMARY))
+
+        reportData.push({
+          component: { name: OCPP20ComponentName.ChargingStation },
+          variable: { name: OCPP20DeviceInfoVariableName.AvailabilityState },
+          variableAttribute: [
+            {
+              type: AttributeEnumType.Actual,
+              value: chargingStation.inAcceptedState()
+                ? OCPP20ConnectorStatusEnumType.Available
+                : OCPP20ConnectorStatusEnumType.Unavailable,
+            },
+          ],
+          variableCharacteristics: { dataType: DataEnumType.string, supportsMonitoring: true },
+        })
+
+        if (chargingStation.hasEvses) {
+          for (const { evseId, evseStatus } of chargingStation.iterateEvses()) {
+            reportData.push({
+              component: {
+                evse: { id: evseId },
+                name: OCPP20ComponentName.EVSE,
+              },
+              variable: { name: OCPP20DeviceInfoVariableName.AvailabilityState },
+              variableAttribute: [
+                { type: AttributeEnumType.Actual, value: evseStatus.availability },
+              ],
+              variableCharacteristics: { dataType: DataEnumType.string, supportsMonitoring: true },
+            })
+          }
+        } else {
+          for (const { connectorId, connectorStatus } of chargingStation.iterateConnectors(true)) {
+            reportData.push({
+              component: {
+                evse: { connectorId, id: 1 },
+                name: OCPP20ComponentName.Connector,
+              },
+              variable: { name: OCPP20DeviceInfoVariableName.AvailabilityState },
+              variableAttribute: [
+                {
+                  type: AttributeEnumType.Actual,
+                  value: connectorStatus.status ?? ConnectorStatusEnum.Unavailable,
+                },
+              ],
+              variableCharacteristics: {
+                dataType: DataEnumType.string,
+                supportsMonitoring: true,
+              },
+            })
+          }
+        }
+        break
+
+      default:
+        logger.warn(
+          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+          `${chargingStation.logPrefix()} ${moduleName}.buildReportData: Unknown reportBase '${reportBase}'`
+        )
+    }
+
+    return reportData
+  }
+
+  private buildTriggeredMeterValuesTarget (
+    chargingStation: ChargingStation,
+    evseId: number,
+    evseStatus: EvseStatus,
+    alignedMeasurandsKey: string,
+    timestamp: Date,
+    connectorId?: number
+  ): TriggeredMeterValuesTarget | undefined {
+    const connectorStatus = connectorId == null ? undefined : evseStatus.connectors.get(connectorId)
+    const connectors: [number, ConnectorStatus][] =
+      connectorId == null
+        ? [...evseStatus.connectors.entries()]
+        : connectorStatus == null
+          ? []
+          : [[connectorId, connectorStatus]]
+    const activeConnectors = connectors.filter(([, connectorStatus]) =>
+      this.isTriggeredTransactionActive(connectorStatus)
+    )
+    if (isEmpty(activeConnectors)) {
+      if (connectors.some(([, status]) => this.hasTriggeredTransactionState(status))) {
+        return
+      }
+      const meterValue = this.buildIdleTriggeredMeterValue(
+        chargingStation,
+        evseId,
+        evseStatus,
+        alignedMeasurandsKey,
+        timestamp,
+        connectorId
+      )
+      return meterValue == null ? undefined : { evseId, samples: [{ meterValue }] }
+    }
+
+    const samples: TriggeredMeterValueSample[] = []
+    for (const [connectorId, connectorStatus] of activeConnectors) {
+      const transactionId = connectorStatus.transactionId?.toString()
+      if (transactionId == null) continue
+      const delivery = TransactionMeterValueDeliveryBarrier.begin(connectorStatus, transactionId)
+      if (delivery == null) {
+        for (const sample of samples) sample.delivery?.settle(true)
+        return
+      }
+      const intervalState = captureTransactionIntervalState(connectorStatus)
+      try {
+        const meterValue = buildClockAlignedConnectorMeterValue(
+          chargingStation,
+          {
+            advanceEnergy: true,
+            commitState: false,
+            connectorId,
+            evseId,
+            timestamp,
+            transactionId,
+          },
+          0,
+          alignedMeasurandsKey,
+          OCPP20ReadingContextEnumType.TRIGGER
+        )
+        if (isNotEmptyArray(meterValue.sampledValue)) {
+          samples.push({
+            connectorId,
+            delivery,
+            intervalBaselineKey: alignedMeasurandsKey,
+            intervalState,
+            meterValue,
+            transactionId,
+          })
+        } else {
+          delivery.settle(true)
+        }
+      } catch (error) {
+        delivery.settle(true)
+        for (const sample of samples) sample.delivery?.settle(true)
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.buildTriggeredMeterValuesTarget: ${getErrorMessage(error)}`
+        )
+        return
+      }
+    }
+    return isNotEmptyArray(samples) ? { evseId, samples } : undefined
+  }
+
+  /**
+   * Cancels a pending {@link sendQueuedSecurityEvents} retry
+   * `setTimeout` and clears the stored handle. No-op when no retry is
+   * pending.
+   * @param stationState - Per-station state carrying the retry handle.
+   */
+  private cancelSecurityEventRetryTimer (stationState: OCPP20StationState): void {
+    if (stationState.securityEventRetryTimer != null) {
+      clearTimeout(stationState.securityEventRetryTimer)
+      delete stationState.securityEventRetryTimer
+    }
+  }
+
+  private clearActiveFirmwareUpdate (chargingStation: ChargingStation, requestId: number): void {
+    const stationState = this.getStationState(chargingStation)
+    if (stationState == null) {
+      return
+    }
+    if (stationState.activeFirmwareUpdateRequestId === requestId) {
+      this.resetActiveFirmwareUpdateState(stationState)
+    } else if (stationState.activeFirmwareUpdateRequestId != null) {
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.clearActiveFirmwareUpdate: Ignoring completion for superseded requestId ${requestId.toString()} (active: ${stationState.activeFirmwareUpdateRequestId.toString()})`
+      )
+    }
+  }
+
+  private clearActiveLogUpload (chargingStation: ChargingStation, requestId: number): void {
+    const stationState = this.getStationState(chargingStation)
+    if (stationState == null) {
+      return
+    }
+    if (stationState.activeLogUploadRequestId === requestId) {
+      this.resetActiveLogUploadState(stationState)
+    } else if (stationState.activeLogUploadRequestId != null) {
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.clearActiveLogUpload: Ignoring completion for superseded requestId ${requestId.toString()} (active: ${stationState.activeLogUploadRequestId.toString()})`
+      )
+    }
+  }
+
+  private connectorHasPendingTransactionEvents (
+    connectorStatus: ConnectorStatus,
+    transactionId?: string
+  ): boolean {
+    const directDeliveryPending = OCPP20ServiceUtils.hasPendingTransactionEventDelivery(
+      connectorStatus,
+      transactionId
+    )
+    const queue = connectorStatus.transactionEventQueue
+    if (queue == null || !isNotEmptyArray(queue)) {
+      return directDeliveryPending
+    }
+    return (
+      directDeliveryPending ||
+      queue.some(
+        queuedEvent =>
+          !isTransactionEventQueueStaged(queuedEvent) &&
+          (transactionId == null ||
+            queuedEvent.request.transactionInfo.transactionId === transactionId)
+      )
+    )
+  }
+
+  /**
+   * Emits the exact MeterValues snapshot reserved before TriggerMessage acceptance.
+   * Transaction-bound samples are discarded if their transaction is no longer active.
+   * @param chargingStation - Target charging station.
+   * @param target - Reserved EVSE snapshot and transaction identities.
+   * @param errorHandler - Handler for downstream request-emission errors.
+   * @param onSettled - Releases transaction delivery barriers after the request outcome is resolved.
+   */
+  private emitEvseMeterValues (
+    chargingStation: ChargingStation,
+    target: TriggeredMeterValuesTarget,
+    errorHandler: (error: unknown) => void,
+    onSettled: (definitivelyRejected: boolean) => void
+  ): void {
+    const samples = target.samples.filter(sample => {
+      if (sample.connectorId == null || sample.transactionId == null) return true
+      const connectorStatus = chargingStation.getConnectorStatus(sample.connectorId, target.evseId)
+      return (
+        connectorStatus != null &&
+        this.isReservedTriggeredTransactionCurrent(connectorStatus, sample.transactionId)
+      )
+    })
+    if (isEmpty(samples)) {
+      OCPP20ServiceUtils.releaseTriggeredMeterValuesRequests(chargingStation, [target.evseId])
+      onSettled(true)
+      return
+    }
+
+    const request: OCPP20MeterValuesRequest = {
+      evseId: target.evseId,
+      meterValue: samples.map(sample => sample.meterValue),
+    }
+    const publicKeyDeliveryTokens: PublicKeyDeliveryToken[] = []
+    const restoreIntervalBaselines: IntervalBaselineRestore[] = []
+    for (const sample of samples) {
+      const { connectorId, intervalBaselineKey, intervalState, transactionId } = sample
+      if (connectorId == null || transactionId == null) continue
+      const connectorStatus = chargingStation.getConnectorStatus(connectorId, target.evseId)
+      if (connectorStatus == null) continue
+      if (intervalBaselineKey != null && intervalState != null) {
+        recordFrozenTransactionIntervalEmission(
+          connectorStatus,
+          sample.meterValue,
+          intervalBaselineKey,
+          chargingStation.getNumberOfPhases(),
+          resolveInletToOutputEfficiency(
+            chargingStation.stationInfo?.currentOutType,
+            chargingStation.stationInfo?.conversionEfficiency,
+            target.evseId
+          )
+        )
+        completeTransactionIntervalState(intervalState, intervalBaselineKey, [sample.meterValue])
+        restoreIntervalBaselines.push({
+          consumed: intervalState.consumed,
+          generation: transactionId,
+          key: connectorStatus,
+          restore: consumed => {
+            restoreTransactionIntervalState(
+              { ...intervalState, consumed },
+              connectorStatus,
+              intervalBaselineKey
+            )
+          },
+        })
+      }
+      const token = claimPublicKeyDelivery(
+        connectorStatus,
+        transactionId,
+        request,
+        sample.meterValue.sampledValue.some(sampledValue =>
+          isNotEmptyString(getRawSignedMeterValuePublicKey(sampledValue))
+        )
+      )
+      if (token != null) publicKeyDeliveryTokens.push(token)
+    }
+    OCPP20ServiceUtils.sendClockAlignedMeterValuesRequest(
+      chargingStation,
+      target.evseId,
+      request,
+      undefined,
+      restoreIntervalBaselines,
+      true,
+      publicKeyDeliveryTokens,
+      onSettled
+    ).catch(errorHandler)
+  }
+
+  private getRestoredConnectorStatus (
+    chargingStation: ChargingStation,
+    evseId: number,
+    connectorId: number
+  ): OCPP20ConnectorStatusEnumType {
+    const stationState = this.getOrCreateStationState(chargingStation)
+    const connectorKey = `${evseId.toString()}:${connectorId.toString()}`
+    const saved = stationState.preInoperativeConnectorStatuses.get(connectorKey)
+    if (saved != null) {
+      stationState.preInoperativeConnectorStatuses.delete(connectorKey)
+      return saved
+    }
+    return OCPP20ConnectorStatusEnumType.Available
+  }
+
+  private handleConnectorChangeAvailability (
+    chargingStation: ChargingStation,
+    evseId: number,
+    connectorId: number,
+    operationalStatus: OCPP20OperationalStatusEnumType,
+    newConnectorStatus: OCPP20ConnectorStatusEnumType
+  ): OCPP20ChangeAvailabilityResponse {
+    if (!chargingStation.hasEvse(evseId)) {
+      return {
+        status: ChangeAvailabilityStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `EVSE ${evseId.toString()} does not exist`,
+          reasonCode: ReasonCodeEnumType.UnknownEvse,
+        },
+      }
+    }
+
+    const evseStatus = chargingStation.getEvseStatus(evseId)
+    const connectorStatus = evseStatus?.connectors.get(connectorId)
+    if (connectorStatus == null) {
+      return {
+        status: ChangeAvailabilityStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `Connector ${connectorId.toString()} on EVSE ${evseId.toString()} does not exist`,
+          reasonCode: ReasonCodeEnumType.UnknownConnectorId,
+        },
+      }
+    }
+
+    if (operationalStatus === OCPP20OperationalStatusEnumType.Inoperative) {
+      this.savePreInoperativeStatuses(chargingStation, evseId, connectorId)
+    }
+    connectorStatus.availability = operationalStatus
+    const resolvedStatus =
+      operationalStatus === OCPP20OperationalStatusEnumType.Operative
+        ? this.getRestoredConnectorStatus(chargingStation, evseId, connectorId)
+        : newConnectorStatus
+
+    sendAndSetConnectorStatus(chargingStation, {
+      connectorId,
+      connectorStatus: resolvedStatus,
+      evseId,
+    }).catch((error: unknown) => {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleConnectorChangeAvailability: Error sending status notification for connector ${connectorId.toString()}:`,
+        error
+      )
+    })
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: Connector ${connectorId.toString()} on EVSE ${evseId.toString()} set to ${operationalStatus}`
+    )
+    return {
+      status: ChangeAvailabilityStatusEnumType.Accepted,
+    }
+  }
+
+  private handleCsLevelInoperative (
+    chargingStation: ChargingStation,
+    operationalStatus: OCPP20OperationalStatusEnumType,
+    newConnectorStatus: OCPP20ConnectorStatusEnumType
+  ): OCPP20ChangeAvailabilityResponse | undefined {
+    let hasActiveTransactions = false
+    for (const { evseId, evseStatus } of chargingStation.iterateEvses(true)) {
+      if (this.hasEvseActiveTransactions(evseStatus)) {
+        hasActiveTransactions = true
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: EVSE ${evseId.toString()} has active transaction, will be set Inoperative when transaction ends`
+        )
+      } else {
+        evseStatus.availability = operationalStatus
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: EVSE ${evseId.toString()} set to ${operationalStatus} immediately (idle)`
+        )
+      }
+    }
+    if (hasActiveTransactions) {
+      for (const { evseId, evseStatus } of chargingStation.iterateEvses(true)) {
+        if (!this.hasEvseActiveTransactions(evseStatus)) {
+          this.sendEvseStatusNotifications(chargingStation, evseId, newConnectorStatus)
+        }
+      }
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: Charging station partially set to ${operationalStatus}, some EVSEs scheduled`
+      )
+      return {
+        status: ChangeAvailabilityStatusEnumType.Scheduled,
+      }
+    }
+    return undefined
+  }
+
+  private handleEvseChangeAvailability (
+    chargingStation: ChargingStation,
+    evseId: number,
+    operationalStatus: OCPP20OperationalStatusEnumType,
+    newConnectorStatus: OCPP20ConnectorStatusEnumType
+  ): OCPP20ChangeAvailabilityResponse {
+    if (!chargingStation.hasEvse(evseId)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: EVSE ${evseId.toString()} not found, rejecting`
+      )
+      return {
+        status: ChangeAvailabilityStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `EVSE ${evseId.toString()} does not exist on charging station`,
+          reasonCode: ReasonCodeEnumType.UnknownEvse,
+        },
+      }
+    }
+
+    const evseStatus = chargingStation.getEvseStatus(evseId)
+    if (operationalStatus === OCPP20OperationalStatusEnumType.Inoperative) {
+      this.savePreInoperativeStatuses(chargingStation, evseId)
+    }
+    if (
+      evseStatus != null &&
+      operationalStatus === OCPP20OperationalStatusEnumType.Inoperative &&
+      this.hasEvseActiveTransactions(evseStatus)
+    ) {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: EVSE ${evseId.toString()} has active transaction, scheduling availability change`
+      )
+      return {
+        status: ChangeAvailabilityStatusEnumType.Scheduled,
+      }
+    }
+
+    if (evseStatus != null) {
+      evseStatus.availability = operationalStatus
+    }
+    if (operationalStatus === OCPP20OperationalStatusEnumType.Operative) {
+      this.sendRestoredEvseStatusNotifications(chargingStation, evseId)
+    } else {
+      this.sendEvseStatusNotifications(chargingStation, evseId, newConnectorStatus)
+    }
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: EVSE ${evseId.toString()} set to ${operationalStatus}`
+    )
+    return {
+      status: ChangeAvailabilityStatusEnumType.Accepted,
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 CertificateSigned request from central system
+   * Receives signed certificate chain from CSMS and stores it in the charging station
+   * Triggers websocket reconnect for ChargingStationCertificate type to use the new certificate
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - CertificateSigned request payload with certificate chain and type
+   * @returns Promise resolving to CertificateSignedResponse indicating operation status
+   */
+  private async handleRequestCertificateSigned (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20CertificateSignedRequest
+  ): Promise<OCPP20CertificateSignedResponse> {
+    const { certificateChain, certificateType } = commandPayload
+
+    if (!hasCertificateManager(chargingStation)) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: Certificate manager not available`
+      )
+      return {
+        status: GenericStatus.Rejected,
+        statusInfo: {
+          additionalInfo: 'Certificate manager is not available on this charging station',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+    }
+
+    if (!chargingStation.certificateManager.validateCertificateFormat(certificateChain)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: Invalid PEM format for certificate chain`
+      )
+      return {
+        status: GenericStatus.Rejected,
+        statusInfo: {
+          additionalInfo: 'Certificate PEM format is invalid or malformed',
+          reasonCode: ReasonCodeEnumType.InvalidCertificate,
+        },
+      }
+    }
+
+    // A02.FR.16: Enforce MaxCertificateChainSize — reject if chain exceeds configured limit
+    const maxChainSizeKey = getConfigurationKey(
+      chargingStation,
+      buildConfigKey(
+        OCPP20ComponentName.SecurityCtrlr,
+        OCPP20OptionalVariableName.MaxCertificateChainSize
+      )
+    )
+    if (maxChainSizeKey?.value != null) {
+      const maxChainSize = convertToIntOrNaN(maxChainSizeKey.value)
+      if (!Number.isNaN(maxChainSize) && maxChainSize > 0) {
+        const chainByteSize = Buffer.byteLength(certificateChain, 'utf8')
+        if (chainByteSize > maxChainSize) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: Certificate chain size ${chainByteSize.toString()} bytes exceeds ${OCPP20OptionalVariableName.MaxCertificateChainSize as string} ${maxChainSize.toString()} bytes`
+          )
+          return {
+            status: GenericStatus.Rejected,
+            statusInfo: {
+              additionalInfo: `Certificate chain size (${chainByteSize.toString()} bytes) exceeds ${OCPP20OptionalVariableName.MaxCertificateChainSize as string} (${maxChainSize.toString()} bytes)`,
+              reasonCode: ReasonCodeEnumType.InvalidCertificate,
+            },
+          }
+        }
+      }
+    }
+
+    const x509Result = chargingStation.certificateManager.validateCertificateX509(certificateChain)
+    if (!x509Result.valid) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: X.509 validation failed: ${x509Result.reason ?? 'Unknown'}`
+      )
+      this.sendSecurityEventNotification(
+        chargingStation,
+        'InvalidChargingStationCertificate',
+        `X.509 validation failed: ${x509Result.reason ?? 'Unknown'}`
+      )
+      return {
+        status: GenericStatus.Rejected,
+        statusInfo: {
+          additionalInfo: x509Result.reason ?? 'Certificate X.509 validation failed',
+          reasonCode: ReasonCodeEnumType.InvalidCertificate,
+        },
+      }
+    }
+
+    try {
+      const result = chargingStation.certificateManager.storeCertificate(
+        chargingStation.stationInfo?.hashId ?? '',
+        certificateType ?? CertificateSigningUseEnumType.ChargingStationCertificate,
+        certificateChain,
+        chargingStation.logPrefix()
+      )
+
+      const storeResult = result instanceof Promise ? await result : result
+
+      const success = typeof storeResult === 'boolean' ? storeResult : storeResult.success
+
+      if (!success) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: Certificate chain storage rejected`
+        )
+        return {
+          status: GenericStatus.Rejected,
+          statusInfo: {
+            additionalInfo: 'Certificate storage rejected the certificate chain as invalid',
+            reasonCode: ReasonCodeEnumType.InvalidCertificate,
+          },
+        }
+      }
+
+      const deliveryCurrent = this.isIncomingRequestDeliveryCurrent(chargingStation)
+      const effectiveCertificateType =
+        certificateType ?? CertificateSigningUseEnumType.ChargingStationCertificate
+      if (
+        deliveryCurrent &&
+        effectiveCertificateType === CertificateSigningUseEnumType.ChargingStationCertificate
+      ) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: Triggering websocket reconnect to use new ChargingStationCertificate`
+        )
+        chargingStation.closeWSConnection()
+      }
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestCertificateSigned: Certificate chain stored successfully`
+      )
+      // A02.FR.20: Cancel retry timer only while the accepted request still owns
+      // the active lifecycle. A durable store that outlives its lifecycle remains successful.
+      if (deliveryCurrent) {
+        this.getCertSigningRetryManager(chargingStation)?.cancelRetryTimer()
+      }
+      return {
+        status: GenericStatus.Accepted,
+      }
+    } catch (error) {
+      const errorResponse: OCPP20CertificateSignedResponse = {
+        status: GenericStatus.Rejected,
+        statusInfo: {
+          additionalInfo: 'Failed to store certificate chain due to a storage error',
+          reasonCode: ReasonCodeEnumType.OutOfStorage,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20CertificateSignedResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.CERTIFICATE_SIGNED,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 ChangeAvailability request from central system (F03, F04).
+   * Changes the operational status of the entire charging station or a specific EVSE.
+   * Per G03.FR.01: EVSE level without ongoing transaction → Accepted
+   * Per G03.FR.02: CS level without ongoing transaction → Accepted
+   * Per G03.FR.03: EVSE level with ongoing transaction and Inoperative → Scheduled
+   * Per G03.FR.04: CS level with some EVSEs having transactions and Inoperative → Scheduled
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - ChangeAvailability request payload with operationalStatus and optional evse
+   * @returns ChangeAvailabilityResponse with Accepted, Rejected, or Scheduled
+   */
+  private handleRequestChangeAvailability (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20ChangeAvailabilityRequest
+  ): OCPP20ChangeAvailabilityResponse {
+    const { evse, operationalStatus } = commandPayload
+    const evseIdLabel = evse?.id == null ? '' : ` for EVSE ${evse.id.toString()}`
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: Received ChangeAvailability request with operationalStatus=${operationalStatus}${evseIdLabel}`
+    )
+
+    const newConnectorStatus =
+      operationalStatus === OCPP20OperationalStatusEnumType.Inoperative
+        ? OCPP20ConnectorStatusEnumType.Unavailable
+        : OCPP20ConnectorStatusEnumType.Available
+
+    // EVSE-level change
+    if (evse?.id != null && evse.id > 0) {
+      if (evse.connectorId != null) {
+        // Connector-level targeting
+        return this.handleConnectorChangeAvailability(
+          chargingStation,
+          evse.id,
+          evse.connectorId,
+          operationalStatus,
+          newConnectorStatus
+        )
+      }
+      return this.handleEvseChangeAvailability(
+        chargingStation,
+        evse.id,
+        operationalStatus,
+        newConnectorStatus
+      )
+    }
+
+    // CS-level change (no evse or evse.id === 0)
+    if (operationalStatus === OCPP20OperationalStatusEnumType.Inoperative) {
+      this.savePreInoperativeStatuses(chargingStation)
+      const result = this.handleCsLevelInoperative(
+        chargingStation,
+        operationalStatus,
+        newConnectorStatus
+      )
+      if (result != null) {
+        return result
+      }
+    }
+
+    // Apply availability change to all EVSEs (for Operative, or Inoperative with no active transactions)
+    for (const { evseStatus } of chargingStation.iterateEvses(true)) {
+      evseStatus.availability = operationalStatus
+    }
+    if (operationalStatus === OCPP20OperationalStatusEnumType.Operative) {
+      this.sendRestoredAllConnectorsStatusNotifications(chargingStation)
+    } else {
+      this.sendAllConnectorsStatusNotifications(chargingStation, newConnectorStatus)
+    }
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: Charging station set to ${operationalStatus}`
+    )
+    return {
+      status: ChangeAvailabilityStatusEnumType.Accepted,
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 CustomerInformation request from central system.
+   * Per TC_N_32_CS: CS must respond to CustomerInformation with Accepted for clear requests.
+   * Simulator has no persistent customer data, so clear is accepted but no-op.
+   * For report requests, sends empty NotifyCustomerInformation (simulator has no real data).
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - CustomerInformation request payload with clear/report flags
+   * @returns CustomerInformationResponse with status
+   */
+  private handleRequestCustomerInformation (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20CustomerInformationRequest
+  ): OCPP20CustomerInformationResponse {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestCustomerInformation: Received CustomerInformation request with clear=${commandPayload.clear.toString()}, report=${commandPayload.report.toString()}`
+    )
+
+    // N09.FR.09: Exactly one of {idToken, customerCertificate, customerIdentifier} must be provided when report=true
+    if (commandPayload.report) {
+      const identifierCount = [
+        commandPayload.idToken,
+        commandPayload.customerCertificate,
+        commandPayload.customerIdentifier,
+      ].filter(id => id != null).length
+
+      if (identifierCount !== 1) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestCustomerInformation: N09.FR.09 violation - expected exactly 1 customer identifier when report=true, got ${identifierCount.toString()}`
+        )
+        return {
+          status: CustomerInformationStatusEnumType.Invalid,
+          statusInfo: {
+            additionalInfo: 'Exactly one customer identifier must be provided when report=true',
+            reasonCode: ReasonCodeEnumType.InvalidValue,
+          },
+        }
+      }
+    }
+
+    if (commandPayload.clear) {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestCustomerInformation: Clear request accepted (simulator has no persistent customer data)`
+      )
+      return {
+        status: CustomerInformationStatusEnumType.Accepted,
+      }
+    }
+
+    if (commandPayload.report) {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestCustomerInformation: Report request accepted, sending empty NotifyCustomerInformation`
+      )
+      return {
+        status: CustomerInformationStatusEnumType.Accepted,
+      }
+    }
+
+    logger.warn(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestCustomerInformation: Neither clear nor report flag set, rejecting`
+    )
+    return {
+      status: CustomerInformationStatusEnumType.Rejected,
+      statusInfo: {
+        additionalInfo: 'Neither clear nor report flag is set in CustomerInformation request',
+        reasonCode: ReasonCodeEnumType.InvalidValue,
+      },
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 DataTransfer request
+   * Per TC_P_01_CS: CS with no vendor extensions must respond UnknownVendorId
+   * @param chargingStation - The charging station instance
+   * @param commandPayload - The DataTransfer request payload
+   * @returns DataTransferResponse with UnknownVendorId status
+   */
+  private handleRequestDataTransfer (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20DataTransferRequest
+  ): OCPP20DataTransferResponse {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestDataTransfer: Received DataTransfer request with vendorId '${commandPayload.vendorId}'`
+    )
+    // Per TC_P_01_CS: CS with no vendor extensions must respond UnknownVendorId
+    return {
+      status: DataTransferStatusEnumType.UnknownVendorId,
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 DeleteCertificate request from central system
+   * Deletes a certificate matching the provided hash data from the charging station
+   * Per M04.FR.06: ChargingStationCertificate cannot be deleted via DeleteCertificateRequest
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - DeleteCertificate request payload with certificate hash data
+   * @returns Promise resolving to DeleteCertificateResponse with status
+   */
+  private async handleRequestDeleteCertificate (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20DeleteCertificateRequest
+  ): Promise<OCPP20DeleteCertificateResponse> {
+    const { certificateHashData } = commandPayload
+
+    if (!hasCertificateManager(chargingStation)) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestDeleteCertificate: Certificate manager not available`
+      )
+      return {
+        status: DeleteCertificateStatusEnumType.Failed,
+        statusInfo: {
+          additionalInfo: 'Certificate manager is not available on this charging station',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+    }
+
+    try {
+      // M04.FR.06: Check if the certificate to delete is a ChargingStationCertificate
+      const isCSCertResult = chargingStation.certificateManager.isChargingStationCertificateHash(
+        chargingStation.stationInfo?.hashId ?? '',
+        certificateHashData
+      )
+      const isCSCert = isCSCertResult instanceof Promise ? await isCSCertResult : isCSCertResult
+
+      if (!this.isIncomingRequestDeliveryCurrent(chargingStation)) {
+        return {
+          status: DeleteCertificateStatusEnumType.Failed,
+          statusInfo: {
+            additionalInfo: 'DeleteCertificate request lifecycle is no longer current',
+            reasonCode: ReasonCodeEnumType.InternalError,
+          },
+        }
+      }
+      if (isCSCert) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestDeleteCertificate: Attempted to delete ChargingStationCertificate (M04.FR.06)`
+        )
+        return {
+          status: DeleteCertificateStatusEnumType.Failed,
+          statusInfo: {
+            additionalInfo: 'ChargingStationCertificate cannot be deleted (M04.FR.06)',
+            reasonCode: ReasonCodeEnumType.NotSupported,
+          },
+        }
+      }
+
+      const result = chargingStation.certificateManager.deleteCertificate(
+        chargingStation.stationInfo?.hashId ?? '',
+        certificateHashData
+      )
+
+      const deleteResult = result instanceof Promise ? await result : result
+
+      if (deleteResult.status === DeleteCertificateStatusEnumType.NotFound) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestDeleteCertificate: Certificate not found`
+        )
+        return {
+          status: DeleteCertificateStatusEnumType.NotFound,
+        }
+      }
+
+      if (deleteResult.status === DeleteCertificateStatusEnumType.Accepted) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestDeleteCertificate: Certificate deleted successfully`
+        )
+        return {
+          status: DeleteCertificateStatusEnumType.Accepted,
+        }
+      }
+
+      return {
+        status: DeleteCertificateStatusEnumType.Failed,
+        statusInfo: {
+          additionalInfo: 'Certificate deletion operation returned a failed status',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+    } catch (error) {
+      const errorResponse: OCPP20DeleteCertificateResponse = {
+        status: DeleteCertificateStatusEnumType.Failed,
+        statusInfo: {
+          additionalInfo: 'Certificate deletion failed due to an unexpected error',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20DeleteCertificateResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.DELETE_CERTIFICATE,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  private handleRequestGetBaseReport (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20GetBaseReportRequest
+  ): OCPP20GetBaseReportResponse {
+    logger.debug(
+      // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetBaseReport: GetBaseReport request received with requestId ${commandPayload.requestId} and reportBase ${commandPayload.reportBase}`
+    )
+
+    if (!Object.values(ReportBaseEnumType).includes(commandPayload.reportBase)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetBaseReport: Unsupported reportBase ${commandPayload.reportBase}`
+      )
+      return {
+        status: GenericDeviceModelStatusEnumType.NotSupported,
+      }
+    }
+
+    const stationState = this.getOrCreateStationState(chargingStation)
+    const requestId = commandPayload.requestId
+    const cached = stationState.reportDataCache.get(requestId)
+    const reportData = cached ?? this.buildReportData(chargingStation, commandPayload.reportBase)
+    if (!isNotEmptyArray(reportData)) {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetBaseReport: No data available for reportBase ${commandPayload.reportBase}`
+      )
+      return {
+        status: GenericDeviceModelStatusEnumType.EmptyResultSet,
+      }
+    }
+    const existingReservation = stationState.reportDataReservations.get(requestId)
+    if (cached != null || existingReservation != null) {
+      throw new OCPPError(
+        ErrorType.OCCURRENCE_CONSTRAINT_VIOLATION,
+        `GetBaseReport requestId ${requestId.toString()} is already active`,
+        OCPP20IncomingRequestCommand.GET_BASE_REPORT,
+        commandPayload
+      )
+    }
+    const retainedBytes = Buffer.byteLength(JSON.stringify(reportData), 'utf8')
+    const reservationRecord: ReportDataReservation = {
+      release: () => undefined,
+    }
+    const reservation = chargingStation.reserveBufferedMessageCallbacks(retainedBytes, () => {
+      if (stationState.reportDataReservations.get(requestId) !== reservationRecord) return
+      stationState.reportDataReservations.delete(requestId)
+      stationState.reportDataCache.delete(requestId)
+    })
+    if (reservation == null) {
+      throw new OCPPError(
+        ErrorType.GENERIC_ERROR,
+        `Report callback capacity exceeded for requestId ${requestId.toString()}`,
+        OCPP20IncomingRequestCommand.GET_BASE_REPORT,
+        commandPayload
+      )
+    }
+    reservationRecord.release = () => {
+      chargingStation.releaseBufferedMessageCallbacks(reservation)
+    }
+    stationState.reportDataReservations.set(requestId, reservationRecord)
+    stationState.reportDataCache.set(requestId, reportData)
+    return {
+      status: GenericDeviceModelStatusEnumType.Accepted,
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 GetInstalledCertificateIds request from central system
+   * Returns list of installed certificates matching the optional filter types
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - GetInstalledCertificateIds request payload with optional certificate type filter
+   * @returns Promise resolving to GetInstalledCertificateIdsResponse with status and certificate chain data
+   */
+  private async handleRequestGetInstalledCertificateIds (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20GetInstalledCertificateIdsRequest
+  ): Promise<OCPP20GetInstalledCertificateIdsResponse> {
+    const { certificateType } = commandPayload
+
+    if (!hasCertificateManager(chargingStation)) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetInstalledCertificateIds: Certificate manager not available`
+      )
+      return {
+        status: GetInstalledCertificateStatusEnumType.NotFound,
+        statusInfo: {
+          additionalInfo: 'Certificate manager is not available on this charging station',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+    }
+
+    try {
+      const filterTypes = certificateType?.map(ct => getCertificateIdUseToInstallCertificateUse[ct])
+
+      const methodResult = chargingStation.certificateManager.getInstalledCertificates(
+        chargingStation.stationInfo?.hashId ?? '',
+        filterTypes
+      )
+      const result: GetInstalledCertificatesResult =
+        methodResult instanceof Promise ? await methodResult : methodResult
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetInstalledCertificateIds: Retrieved ${String(result.certificateHashDataChain.length)} certificates`
+      )
+
+      return {
+        certificateHashDataChain: isNotEmptyArray(result.certificateHashDataChain)
+          ? result.certificateHashDataChain
+          : undefined,
+        status: isNotEmptyArray(result.certificateHashDataChain)
+          ? GetInstalledCertificateStatusEnumType.Accepted
+          : GetInstalledCertificateStatusEnumType.NotFound,
+      }
+    } catch (error) {
+      const errorResponse: OCPP20GetInstalledCertificateIdsResponse = {
+        status: GetInstalledCertificateStatusEnumType.NotFound,
+        statusInfo: {
+          additionalInfo: 'Failed to retrieve installed certificates due to an unexpected error',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20GetInstalledCertificateIdsResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.GET_INSTALLED_CERTIFICATE_IDS,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 GetLog request from central system.
+   * When a prior upload is in progress, cancels it per N01.FR.12/FR.20
+   * and returns AcceptedCanceled; otherwise simulates an Uploading → Uploaded
+   * lifecycle via LogStatusNotification messages.
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - GetLog request payload with log type, requestId, and log parameters
+   * @returns GetLogResponse with `Accepted` (no prior upload) or `AcceptedCanceled`
+   *   (superseded prior upload) status and simulated filename.
+   */
+  private handleRequestGetLog (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20GetLogRequest
+  ): OCPP20GetLogResponse {
+    const { logType, requestId } = commandPayload
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetLog: Received GetLog request with requestId ${requestId.toString()} for logType '${logType}'`
+    )
+
+    const stationState = this.getStationState(chargingStation)
+    if (stationState?.activeLogUploadRequestId != null) {
+      const previousRequestId = stationState.activeLogUploadRequestId
+      stationState.activeLogUploadAbortController?.abort()
+      this.resetActiveLogUploadState(stationState)
+      this.sendLogStatusNotification(
+        chargingStation,
+        UploadLogStatusEnumType.AcceptedCanceled,
+        previousRequestId
+      ).catch((error: unknown) => {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetLog: Failed to send AcceptedCanceled for superseded requestId ${previousRequestId.toString()}:`,
+          error
+        )
+      })
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetLog: Canceled previous log upload (requestId ${previousRequestId.toString()})`
+      )
+      return {
+        filename: 'simulator-log.txt',
+        status: LogStatusEnumType.AcceptedCanceled,
+      }
+    }
+
+    return {
+      filename: 'simulator-log.txt',
+      status: LogStatusEnumType.Accepted,
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 GetTransactionStatus request from central system.
+   * Per D14, E28-E34: Returns transaction status with ongoingIndicator and messagesInQueue.
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - GetTransactionStatus request payload with optional transactionId
+   * @returns GetTransactionStatusResponse with ongoingIndicator and messagesInQueue
+   */
+  private handleRequestGetTransactionStatus (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20GetTransactionStatusRequest
+  ): OCPP20GetTransactionStatusResponse {
+    const { transactionId } = commandPayload
+    const transactionLabel = transactionId == null ? '' : ` for transaction ID ${transactionId}`
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetTransactionStatus: Received GetTransactionStatus request${transactionLabel}`
+    )
+
+    // E14.FR.06: When transactionId is omitted, ongoingIndicator SHALL NOT be set
+    if (transactionId == null) {
+      return {
+        messagesInQueue: this.hasPendingTransactionEvents(chargingStation),
+      }
+    }
+
+    const evseId = chargingStation.getEvseIdByTransactionId(transactionId)
+    const connectorId = chargingStation.getConnectorIdByTransactionId(transactionId)
+    const connectorStatus =
+      connectorId != null ? chargingStation.getConnectorStatus(connectorId, evseId) : undefined
+
+    return {
+      messagesInQueue: this.hasPendingTransactionEvents(chargingStation, transactionId),
+      ongoingIndicator: connectorStatus != null && !isTransactionEnding(connectorStatus),
+    }
+  }
+
+  private async handleRequestInstallCertificate (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20InstallCertificateRequest
+  ): Promise<OCPP20InstallCertificateResponse> {
+    const { certificate, certificateType } = commandPayload
+
+    if (!hasCertificateManager(chargingStation)) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestInstallCertificate: Certificate manager not available`
+      )
+      return {
+        status: InstallCertificateStatusEnumType.Failed,
+        statusInfo: {
+          additionalInfo: 'Certificate manager is not available on this charging station',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+    }
+
+    if (!chargingStation.certificateManager.validateCertificateFormat(certificate)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestInstallCertificate: Invalid PEM format for certificate type ${certificateType}`
+      )
+      return {
+        status: InstallCertificateStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'Certificate PEM format is invalid or malformed',
+          reasonCode: ReasonCodeEnumType.InvalidCertificate,
+        },
+      }
+    }
+
+    const x509Result = chargingStation.certificateManager.validateCertificateX509(certificate)
+    if (!x509Result.valid) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestInstallCertificate: X.509 validation failed for type ${certificateType}: ${x509Result.reason ?? 'Unknown'}`
+      )
+      return {
+        status: InstallCertificateStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: x509Result.reason ?? 'Certificate X.509 validation failed',
+          reasonCode: ReasonCodeEnumType.InvalidCertificate,
+        },
+      }
+    }
+
+    try {
+      const rawResult = chargingStation.certificateManager.storeCertificate(
+        chargingStation.stationInfo?.hashId ?? '',
+        certificateType,
+        certificate,
+        chargingStation.logPrefix()
+      )
+      const resultPromise: Promise<StoreCertificateResult> =
+        rawResult instanceof Promise
+          ? promiseWithTimeout(
+            rawResult,
+            OCPP20Constants.HANDLER_TIMEOUT_MS,
+              `storeCertificate timed out after ${OCPP20Constants.HANDLER_TIMEOUT_MS.toString()}ms`
+          )
+          : Promise.resolve(rawResult)
+      const storeResult: StoreCertificateResult = await resultPromise
+
+      if (!storeResult.success) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestInstallCertificate: Certificate storage rejected for type ${certificateType}`
+        )
+        return {
+          status: InstallCertificateStatusEnumType.Rejected,
+          statusInfo: {
+            additionalInfo: 'Certificate storage rejected the certificate as invalid',
+            reasonCode: ReasonCodeEnumType.InvalidCertificate,
+          },
+        }
+      }
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestInstallCertificate: Certificate installed successfully for type ${certificateType}`
+      )
+      return {
+        status: InstallCertificateStatusEnumType.Accepted,
+      }
+    } catch (error) {
+      const errorResponse: OCPP20InstallCertificateResponse = {
+        status: InstallCertificateStatusEnumType.Failed,
+        statusInfo: {
+          additionalInfo: 'Failed to store certificate due to a storage error',
+          reasonCode: ReasonCodeEnumType.OutOfStorage,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20InstallCertificateResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.INSTALL_CERTIFICATE,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  private handleRequestReset (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20ResetRequest
+  ): OCPP20ResetResponse {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: Reset request received with type ${commandPayload.type}${commandPayload.evseId != null ? ` for EVSE ${commandPayload.evseId.toString()}` : ''}`
+    )
+
+    const { evseId, type } = commandPayload
+
+    if (
+      !OCPP20ServiceUtils.readVariableAsBoolean(
+        chargingStation,
+        OCPP20ComponentName.EVSE,
+        OCPP20OptionalVariableName.AllowReset,
+        true
+      )
+    ) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: AllowReset is false, rejecting reset request`
+      )
+      return {
+        status: ResetStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'AllowReset variable is set to false',
+          reasonCode: ReasonCodeEnumType.NotEnabled,
+        },
+      }
+    }
+
+    if (this.hasFirmwareUpdateInProgress(chargingStation)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: Firmware update in progress, rejecting reset request`
+      )
+      return {
+        status: ResetStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'Firmware update is in progress',
+          reasonCode: ReasonCodeEnumType.FwUpdateInProgress,
+        },
+      }
+    }
+
+    if (evseId != null && evseId > 0) {
+      if (!chargingStation.hasEvses) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: Charging station does not support EVSE-specific reset`
+        )
+        return {
+          status: ResetStatusEnumType.Rejected,
+          statusInfo: {
+            additionalInfo: 'Charging station does not support resetting individual EVSE',
+            reasonCode: ReasonCodeEnumType.UnsupportedRequest,
+          },
+        }
+      }
+
+      const evseExists = chargingStation.hasEvse(evseId)
+      if (!evseExists) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: EVSE ${evseId.toString()} not found, rejecting reset request`
+        )
+        return {
+          status: ResetStatusEnumType.Rejected,
+          statusInfo: {
+            additionalInfo: `EVSE ${evseId.toString()} does not exist on charging station`,
+            reasonCode: ReasonCodeEnumType.UnknownEvse,
+          },
+        }
+      }
+    }
+
+    const hasActiveTransactions = chargingStation.getNumberOfRunningTransactions() > 0
+
+    let evseHasActiveTransactions = false
+    if (evseId != null && evseId > 0) {
+      const evse = chargingStation.getEvseStatus(evseId)
+      if (evse != null) {
+        evseHasActiveTransactions = this.hasEvseActiveTransactions(evse)
+      }
+    }
+
+    try {
+      if (type === ResetEnumType.Immediate) {
+        if (evseId != null && evseId > 0) {
+          logger.info(
+            `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: Immediate EVSE reset ${evseHasActiveTransactions ? 'with active transaction, will terminate transaction and reset' : 'without active transactions for'} EVSE ${evseId.toString()}`
+          )
+          this.pendingResetActions.set(commandPayload, async lifecycleSignal => {
+            if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+            const currentEvse = chargingStation.getEvseStatus(evseId)
+            const terminateTransactions =
+              currentEvse != null && this.hasEvseActiveTransactions(currentEvse)
+            if (terminateTransactions) {
+              await this.terminateEvseTransactions(
+                chargingStation,
+                evseId,
+                OCPP20ReasonEnumType.ImmediateReset
+              )
+              if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+            }
+            this.scheduleEvseReset(chargingStation, evseId, terminateTransactions, lifecycleSignal)
+          })
+          return { status: ResetStatusEnumType.Accepted }
+        }
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: Immediate reset ${hasActiveTransactions ? 'with active transactions, will terminate transactions and reset' : 'without active transactions'}`
+        )
+        this.pendingResetActions.set(commandPayload, async lifecycleSignal => {
+          if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+          if (chargingStation.getNumberOfRunningTransactions() > 0) {
+            await this.terminateAllTransactions(
+              chargingStation,
+              OCPP20ReasonEnumType.ImmediateReset
+            )
+            if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+          } else {
+            this.sendAllConnectorsStatusNotifications(
+              chargingStation,
+              OCPP20ConnectorStatusEnumType.Unavailable
+            )
+          }
+          await chargingStation.reset(StopTransactionReason.REMOTE)
+        })
+        return { status: ResetStatusEnumType.Accepted }
+      }
+
+      if (evseId != null && evseId > 0) {
+        const evse = chargingStation.getEvseStatus(evseId)
+        const resetScheduled = evse != null && !this.isEvseIdle(chargingStation, evse)
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: OnIdle EVSE reset ${resetScheduled ? `scheduled for EVSE ${evseId.toString()}, waiting for idle state` : `- EVSE ${evseId.toString()} is idle, resetting immediately`}`
+        )
+        this.pendingResetActions.set(commandPayload, lifecycleSignal => {
+          if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+          const currentEvse = chargingStation.getEvseStatus(evseId)
+          if (currentEvse != null && !this.isEvseIdle(chargingStation, currentEvse)) {
+            this.scheduleEvseResetOnIdle(chargingStation, evseId, lifecycleSignal)
+          } else {
+            this.scheduleEvseReset(chargingStation, evseId, false, lifecycleSignal)
+          }
+        })
+        return {
+          status: resetScheduled ? ResetStatusEnumType.Scheduled : ResetStatusEnumType.Accepted,
+        }
+      }
+
+      const resetScheduled = !this.isChargingStationIdle(chargingStation)
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: OnIdle reset ${resetScheduled ? 'scheduled, waiting for idle state' : '- charging station is idle, resetting immediately'}`
+      )
+      this.pendingResetActions.set(commandPayload, async lifecycleSignal => {
+        if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+        if (!this.isChargingStationIdle(chargingStation)) {
+          this.scheduleResetOnIdle(chargingStation, lifecycleSignal)
+        } else {
+          await chargingStation.reset(StopTransactionReason.REMOTE)
+        }
+      })
+      return {
+        status: resetScheduled ? ResetStatusEnumType.Scheduled : ResetStatusEnumType.Accepted,
+      }
+    } catch (error) {
+      const errorResponse: OCPP20ResetResponse = {
+        status: ResetStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'Internal error occurred while processing reset request',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20ResetResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.RESET,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 SetNetworkProfile request from central system.
+   * Per B09.FR.01: Validates configurationSlot and connectionData, returns Accepted for valid requests.
+   * The simulator accepts the request but does not perform actual network profile switching.
+   *
+   * **Simulator limitations** (documented, not implemented):
+   * - B09.FR.04: securityProfile downgrade detection requires persistent SecurityProfile state
+   * - B09.FR.05: configurationSlot vs NetworkConfigurationPriority cross-check requires device model query
+   * @param chargingStation - The charging station instance
+   * @param commandPayload - The SetNetworkProfile request payload
+   * @returns SetNetworkProfileResponse with Accepted or Rejected status
+   */
+  private handleRequestSetNetworkProfile (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20SetNetworkProfileRequest
+  ): OCPP20SetNetworkProfileResponse {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetNetworkProfile: Received SetNetworkProfile request`
+    )
+
+    // Validate configurationSlot is a positive integer (B09.FR.02)
+    if (
+      !Number.isInteger(commandPayload.configurationSlot) ||
+      commandPayload.configurationSlot <= 0
+    ) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetNetworkProfile: Invalid configurationSlot: ${commandPayload.configurationSlot.toString()}`
+      )
+      return {
+        status: SetNetworkProfileStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'ConfigurationSlot must be a positive integer',
+          reasonCode: ReasonCodeEnumType.InvalidNetworkConf,
+        },
+      }
+    }
+
+    const currentSecurityProfile = OCPP20ServiceUtils.readVariableAsInteger(
+      chargingStation,
+      OCPP20ComponentName.SecurityCtrlr,
+      OCPP20RequiredVariableName.SecurityProfile,
+      0
+    )
+    const newSecurityProfile = commandPayload.connectionData.securityProfile
+    if (newSecurityProfile < currentSecurityProfile) {
+      // B09.FR.04 (errata 2025-09): Check AllowSecurityProfileDowngrade before rejecting
+      const allowDowngrade = OCPP20ServiceUtils.readVariableAsBoolean(
+        chargingStation,
+        OCPP20ComponentName.SecurityCtrlr,
+        'AllowSecurityProfileDowngrade',
+        false
+      )
+
+      // B09.FR.31 (errata 2025-09 §2.12): Allow downgrade except to profile 1 when enabled
+      if (!allowDowngrade || newSecurityProfile <= 1) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetNetworkProfile: Rejected security profile downgrade: ${newSecurityProfile.toString()} < ${currentSecurityProfile.toString()}`
+        )
+        return {
+          status: SetNetworkProfileStatusEnumType.Rejected,
+          statusInfo: {
+            additionalInfo: `Security profile downgrade not allowed: current=${currentSecurityProfile.toString()}, requested=${newSecurityProfile.toString()}`,
+            reasonCode: ReasonCodeEnumType.NoSecurityDowngrade,
+          },
+        }
+      }
+    }
+
+    const priorityValue = OCPP20ServiceUtils.readVariableAsString(
+      chargingStation,
+      OCPP20ComponentName.OCPPCommCtrlr,
+      OCPP20RequiredVariableName.NetworkConfigurationPriority
+    )
+    if (isNotEmptyString(priorityValue)) {
+      const priorities = priorityValue.split(',').map(Number)
+      if (!priorities.includes(commandPayload.configurationSlot)) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetNetworkProfile: Slot ${commandPayload.configurationSlot.toString()} not in NetworkConfigurationPriority`
+        )
+        return {
+          status: SetNetworkProfileStatusEnumType.Rejected,
+          statusInfo: {
+            additionalInfo: `Configuration slot ${commandPayload.configurationSlot.toString()} is not in NetworkConfigurationPriority list`,
+            reasonCode: ReasonCodeEnumType.InvalidConfSlot,
+          },
+        }
+      }
+    }
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetNetworkProfile: Accepting SetNetworkProfile request for slot ${commandPayload.configurationSlot.toString()}`
+    )
+    return {
+      status: SetNetworkProfileStatusEnumType.Accepted,
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 RequestStartTransaction request from central system
+   * Initiates charging transaction on specified EVSE with enhanced authorization
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - RequestStartTransaction request payload with EVSE, ID token and profiles
+   * @returns Promise resolving to RequestStartTransactionResponse with status and transaction details
+   */
+  private async handleRequestStartTransaction (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20RequestStartTransactionRequest
+  ): Promise<OCPP20RequestStartTransactionResponse> {
+    const { chargingProfile, evseId, groupIdToken, idToken, remoteStartId } = commandPayload
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Remote start transaction request received on EVSE ${evseId?.toString() ?? 'undefined'} with idToken '${truncateId(idToken.idToken)}' and remoteStartId ${remoteStartId.toString()}`
+    )
+
+    let requestedEvseStatus: EvseStatus | undefined
+    if (evseId != null) {
+      requestedEvseStatus = chargingStation.getEvseStatus(evseId)
+      if (requestedEvseStatus == null) {
+        const errorMsg = `EVSE ${evseId.toString()} does not exist on charging station`
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: ${errorMsg}`
+        )
+        throw new OCPPError(
+          ErrorType.PROPERTY_CONSTRAINT_VIOLATION,
+          errorMsg,
+          OCPP20IncomingRequestCommand.REQUEST_START_TRANSACTION,
+          commandPayload
+        )
+      }
+      const pendingConnector = [...requestedEvseStatus.connectors.entries()].find(
+        ([, connectorStatus]) =>
+          connectorStatus.transactionPending === true &&
+          typeof connectorStatus.transactionId === 'string'
+      )
+      if (pendingConnector != null) {
+        const [connectorId, connectorStatus] = pendingConnector
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Connector ${connectorId.toString()} has a pending transaction not yet authorized`
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.TxStarted,
+          `Connector ${connectorId.toString()} has a pending transaction not yet authorized`,
+          connectorStatus.transactionId as UUIDv4
+        )
+      }
+    }
+
+    const target = this.selectRemoteStartConnector(chargingStation, evseId)
+    if (target == null) {
+      const hasAvailableConnector =
+        requestedEvseStatus != null &&
+        [...requestedEvseStatus.connectors.values()].some(connectorStatus =>
+          this.isRemoteStartConnectorAvailable(requestedEvseStatus, connectorStatus)
+        )
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: No eligible connector for remote start${evseId != null ? ` on EVSE ${evseId.toString()}` : ''}`
+      )
+      return buildRejectedResponse(
+        hasAvailableConnector ? ReasonCodeEnumType.TxInProgress : ReasonCodeEnumType.NotFound,
+        `No eligible connector found for remote start${evseId != null ? ` on EVSE ${evseId.toString()}` : ''}`
+      )
+    }
+    const {
+      connectorId,
+      connectorStatus,
+      evseId: resolvedEvseId,
+      evseStatus: selectedEvseStatus,
+    } = target
+    if (evseId == null) {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Auto-selected EVSE ${resolvedEvseId.toString()} connector ${connectorId.toString()}`
+      )
+    }
+
+    const shouldAuthorizeRemoteStart = OCPP20ServiceUtils.readVariableAsBoolean(
+      chargingStation,
+      OCPP20ComponentName.AuthCtrlr,
+      OCPP20RequiredVariableName.AuthorizeRemoteStart,
+      true
+    )
+
+    let isAuthorized = true
+    if (shouldAuthorizeRemoteStart) {
+      // C12.FR.09: Check MasterPassGroupId before authorization
+      const masterPassGroupId = OCPP20ServiceUtils.readVariableValue(
+        chargingStation,
+        OCPP20ComponentName.AuthCtrlr,
+        OCPP20OptionalVariableName.MasterPassGroupId
+      )
+      if (
+        masterPassGroupId != null &&
+        isNotEmptyString(masterPassGroupId) &&
+        groupIdToken?.idToken === masterPassGroupId
+      ) {
+        logger.debug(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: IdToken with MasterPassGroupId group cannot start a transaction`
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InvalidIdToken,
+          'MasterPassGroupId tokens cannot start transactions'
+        )
+      }
+
+      try {
+        isAuthorized = await this.authorizeToken(
+          chargingStation,
+          connectorId,
+          idToken.idToken,
+          'IdToken',
+          idToken.type
+        )
+      } catch (error) {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Authorization error for '${truncateId(idToken.idToken)}':`,
+          ensureError(error)
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InternalError,
+          'Authorization error occurred'
+        )
+      }
+    } else {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: AuthorizeRemoteStart=false, skipping authorization`
+      )
+    }
+
+    if (!isAuthorized) {
+      return buildRejectedResponse(
+        ReasonCodeEnumType.InvalidIdToken,
+        `IdToken '${truncateId(idToken.idToken)}' is not authorized`
+      )
+    }
+
+    if (groupIdToken != null) {
+      let isGroupAuthorized: boolean
+      try {
+        isGroupAuthorized = await this.authorizeToken(
+          chargingStation,
+          connectorId,
+          groupIdToken.idToken,
+          'GroupIdToken',
+          groupIdToken.type
+        )
+      } catch (error) {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Group authorization error for '${truncateId(groupIdToken.idToken)}':`,
+          ensureError(error)
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InternalError,
+          'Group authorization error occurred'
+        )
+      }
+      if (!isGroupAuthorized) {
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InvalidIdToken,
+          `GroupIdToken '${truncateId(groupIdToken.idToken)}' is not authorized`
+        )
+      }
+    }
+
+    if (chargingProfile != null) {
+      // OCPP 2.0.1 §2.10: RequestStartTransaction requires chargingProfilePurpose = TxProfile
+      if (
+        chargingProfile.chargingProfilePurpose !== OCPP20ChargingProfilePurposeEnumType.TxProfile
+      ) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: ChargingProfile must have purpose TxProfile for RequestStartTransaction, got ${chargingProfile.chargingProfilePurpose}`
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InvalidProfile,
+          'ChargingProfile must have purpose TxProfile'
+        )
+      }
+
+      // OCPP 2.0.1 §2.10: transactionId MUST NOT be set in RequestStartTransaction
+      if (chargingProfile.transactionId != null) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: ChargingProfile transactionId must not be set for RequestStartTransaction`
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InvalidProfile,
+          'ChargingProfile transactionId must not be set'
+        )
+      }
+      let isValidProfile: boolean
+      try {
+        isValidProfile = this.validateChargingProfile(
+          chargingStation,
+          chargingProfile,
+          resolvedEvseId
+        )
+      } catch (error) {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Charging profile validation error:`,
+          ensureError(error)
+        )
+        return buildRejectedResponse(
+          ReasonCodeEnumType.InternalError,
+          'Charging profile validation error'
+        )
+      }
+      if (!isValidProfile) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Invalid charging profile`
+        )
+        return buildRejectedResponse(ReasonCodeEnumType.InvalidProfile, 'Invalid charging profile')
+      }
+    }
+
+    if (!this.isIncomingRequestAdmissionCurrent(chargingStation)) {
+      return buildRejectedResponse(
+        ReasonCodeEnumType.InternalError,
+        'RequestStartTransaction admission lifecycle is no longer current'
+      )
+    }
+    const currentEvseStatus = chargingStation.getEvseStatus(resolvedEvseId)
+    const currentConnectorStatus = chargingStation.getConnectorStatus(connectorId, resolvedEvseId)
+    if (currentEvseStatus !== selectedEvseStatus || currentConnectorStatus !== connectorStatus) {
+      return buildRejectedResponse(
+        ReasonCodeEnumType.TxInProgress,
+        `Connector ${connectorId.toString()} ownership changed while authorizing remote start`
+      )
+    }
+    if (!this.isRemoteStartConnectorAvailable(currentEvseStatus, currentConnectorStatus)) {
+      return buildRejectedResponse(
+        ReasonCodeEnumType.NotFound,
+        `Connector ${connectorId.toString()} became unavailable while authorizing remote start`
+      )
+    }
+    const pendingConnector =
+      evseId != null
+        ? [...currentEvseStatus.connectors.entries()].find(
+            ([, candidate]) =>
+              candidate.transactionPending === true && typeof candidate.transactionId === 'string'
+          )
+        : currentConnectorStatus.transactionPending === true &&
+            typeof currentConnectorStatus.transactionId === 'string'
+          ? ([connectorId, currentConnectorStatus] as const)
+          : undefined
+    if (pendingConnector != null) {
+      const [pendingConnectorId, pendingConnectorStatus] = pendingConnector
+      return buildRejectedResponse(
+        ReasonCodeEnumType.TxStarted,
+        `Connector ${pendingConnectorId.toString()} has a pending transaction not yet authorized`,
+        pendingConnectorStatus.transactionId as UUIDv4
+      )
+    }
+    if (this.hasEvseTransactionOwnership(currentEvseStatus)) {
+      return buildRejectedResponse(
+        ReasonCodeEnumType.TxInProgress,
+        `EVSE ${resolvedEvseId.toString()} gained transaction ownership while authorizing remote start`
+      )
+    }
+    if (!this.isRemoteStartConnectorEligible(currentEvseStatus, currentConnectorStatus)) {
+      return buildRejectedResponse(
+        ReasonCodeEnumType.TxInProgress,
+        `Connector ${connectorId.toString()} already has an active, pending, starting, ending, or locked transaction`
+      )
+    }
+
+    const transactionId = generateUUID()
+
+    try {
+      // E01.FR.07 + E01.FR.16 + E03.FR.01: ensure clean transaction state for new transaction
+      OCPP20ServiceUtils.resetTransactionSequenceNumber(
+        chargingStation,
+        connectorId,
+        resolvedEvseId
+      )
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Setting transaction state for connector ${connectorId.toString()}, transaction ID: ${transactionId}`
+      )
+      connectorStatus.transactionPending = true
+      connectorStatus.transactionId = transactionId
+      connectorStatus.transactionIdTag = idToken.idToken
+      connectorStatus.transactionGroupIdToken = groupIdToken?.idToken
+      connectorStatus.transactionStart = new Date()
+      connectorStatus.transactionEnergyActiveImportRegisterValue = 0
+      connectorStatus.remoteStartId = remoteStartId
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Transaction state set successfully for connector ${connectorId.toString()}`
+      )
+
+      if (chargingProfile != null) {
+        connectorStatus.chargingProfiles ??= []
+        connectorStatus.chargingProfiles.push(chargingProfile)
+        logger.debug(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Charging profile stored for transaction ${transactionId}`
+        )
+      }
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Remote start transaction ACCEPTED on #${connectorId.toString()} for idToken '${truncateId(idToken.idToken)}'`
+      )
+      this.pendingRemoteStartResponses.set(commandPayload, {
+        connectorId,
+        evseId: resolvedEvseId,
+        transactionId,
+      })
+
+      return {
+        status: RequestStartStopStatusEnumType.Accepted,
+        transactionId,
+      }
+    } catch (error) {
+      await this.resetConnectorOnStartTransactionError(
+        chargingStation,
+        connectorId,
+        resolvedEvseId,
+        transactionId
+      )
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStartTransaction: Error starting transaction:`,
+        ensureError(error)
+      )
+      return buildRejectedResponse(ReasonCodeEnumType.InternalError, 'Error starting transaction')
+    }
+  }
+
+  private handleRequestStopTransaction (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20RequestStopTransactionRequest
+  ): OCPP20RequestStopTransactionResponse {
+    const { transactionId } = commandPayload
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestStopTransaction: Remote stop transaction request received for transaction ID ${transactionId as string}`
+    )
+
+    if (!validateUUID(transactionId)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStopTransaction: Invalid transaction ID format (expected UUID): ${transactionId as string}`
+      )
+      return {
+        status: RequestStartStopStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'Invalid transaction ID format',
+          reasonCode: ReasonCodeEnumType.InvalidValue,
+        },
+      }
+    }
+
+    const evseId = chargingStation.getEvseIdByTransactionId(transactionId)
+    if (evseId == null) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStopTransaction: Transaction ID ${transactionId as string} does not exist on any EVSE`
+      )
+      return {
+        status: RequestStartStopStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `Transaction ID ${transactionId as string} does not exist`,
+          reasonCode: ReasonCodeEnumType.TxNotFound,
+        },
+      }
+    }
+
+    const connectorId = chargingStation.getConnectorIdByTransactionId(transactionId)
+    if (connectorId == null) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStopTransaction: Transaction ID ${transactionId as string} does not exist on any connector`
+      )
+      return {
+        status: RequestStartStopStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `Transaction ID ${transactionId as string} does not exist on any connector`,
+          reasonCode: ReasonCodeEnumType.TxNotFound,
+        },
+      }
+    }
+
+    const connectorStatus = chargingStation.getConnectorStatus(connectorId, evseId)
+    if (connectorStatus == null || isTransactionEnding(connectorStatus)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestStopTransaction: Transaction ID ${transactionId as string} is not active`
+      )
+      return {
+        status: RequestStartStopStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `Transaction ID ${transactionId as string} is not active`,
+          reasonCode: ReasonCodeEnumType.TxNotFound,
+        },
+      }
+    }
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestStopTransaction: Remote stop transaction ACCEPTED for transactionId '${transactionId as string}'`
+    )
+    return {
+      status: RequestStartStopStatusEnumType.Accepted,
+    }
+  }
+
+  private handleRequestTriggerMessage (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20TriggerMessageRequest
+  ): OCPP20TriggerMessageResponse {
+    try {
+      const { evse, requestedMessage } = commandPayload
+
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestTriggerMessage: TriggerMessage received for '${requestedMessage}'${evse?.id != null ? ` on EVSE ${evse.id.toString()}` : ''}`
+      )
+
+      switch (requestedMessage) {
+        case MessageTriggerEnumType.BootNotification:
+          if (
+            chargingStation.bootNotificationResponse?.status === RegistrationStatusEnumType.ACCEPTED
+          ) {
+            return {
+              status: TriggerMessageStatusEnumType.Rejected,
+              statusInfo: {
+                additionalInfo: 'BootNotification already accepted (F06.FR.17)',
+                reasonCode: ReasonCodeEnumType.NotEnabled,
+              },
+            }
+          }
+          return { status: TriggerMessageStatusEnumType.Accepted }
+
+        case MessageTriggerEnumType.FirmwareStatusNotification:
+        case MessageTriggerEnumType.Heartbeat:
+        case MessageTriggerEnumType.LogStatusNotification:
+          return { status: TriggerMessageStatusEnumType.Accepted }
+
+        case MessageTriggerEnumType.MeterValues: {
+          const evseValidation = this.validateTriggerMessageEvse(chargingStation, evse)
+          if (evseValidation != null) return evseValidation
+          const targetEvseIds = this.resolveMeterValuesTriggerEvseIds(chargingStation, evse)
+          if (
+            !OCPP20ServiceUtils.reserveTriggeredMeterValuesRequests(chargingStation, targetEvseIds)
+          ) {
+            return {
+              status: TriggerMessageStatusEnumType.Rejected,
+              statusInfo: {
+                additionalInfo: 'A MeterValues trigger is already pending for a target EVSE',
+                reasonCode: ReasonCodeEnumType.OutOfMemory,
+              },
+            }
+          }
+          const alignedMeasurandsKey = buildConfigKey(
+            OCPP20ComponentName.AlignedDataCtrlr,
+            OCPP20RequiredVariableName.Measurands
+          )
+          const timestamp = new Date()
+          const targets: TriggeredMeterValuesTarget[] = []
+          for (const targetEvseId of targetEvseIds) {
+            const evseStatus = chargingStation.getEvseStatus(targetEvseId)
+            const target =
+              evseStatus == null
+                ? undefined
+                : this.buildTriggeredMeterValuesTarget(
+                  chargingStation,
+                  targetEvseId,
+                  evseStatus,
+                  alignedMeasurandsKey,
+                  timestamp,
+                  evse?.id != null && evse.id > 0 ? evse.connectorId : undefined
+                )
+            if (target == null) {
+              OCPP20ServiceUtils.releaseTriggeredMeterValuesRequests(chargingStation, targetEvseIds)
+              for (const reservedTarget of targets) {
+                for (const sample of reservedTarget.samples) sample.delivery?.settle(true)
+              }
+              return {
+                status: TriggerMessageStatusEnumType.Rejected,
+                statusInfo: {
+                  additionalInfo: `EVSE ${targetEvseId.toString()} has no configured MeterValues sample`,
+                  reasonCode: ReasonCodeEnumType.NotEnabled,
+                },
+              }
+            }
+            targets.push(target)
+          }
+          const deliveryTargets: TriggeredMeterValuesDeliveryTarget[] = targets.flatMap(target =>
+            target.samples.flatMap(sample =>
+              sample.delivery == null ? [] : [{ delivery: sample.delivery, evseId: target.evseId }]
+            )
+          )
+          this.triggerMeterValuesReservations.set(commandPayload, { deliveryTargets, targets })
+          return { status: TriggerMessageStatusEnumType.Accepted }
+        }
+
+        case MessageTriggerEnumType.StatusNotification: {
+          const evseValidation = this.validateTriggerMessageEvse(chargingStation, evse)
+          if (evseValidation != null) return evseValidation
+          return { status: TriggerMessageStatusEnumType.Accepted }
+        }
+
+        case MessageTriggerEnumType.TransactionEvent: {
+          const evseValidation = this.validateTriggerMessageEvse(chargingStation, evse)
+          if (evseValidation != null) {
+            return evseValidation
+          }
+          const activeTargets = this.resolveActiveTransactionConnectors(chargingStation, evse)
+          if (isEmpty(activeTargets)) {
+            return {
+              status: TriggerMessageStatusEnumType.Rejected,
+              statusInfo: {
+                additionalInfo: 'No active transaction to trigger a TransactionEvent for',
+                reasonCode: ReasonCodeEnumType.TxNotFound,
+              },
+            }
+          }
+          const reservedTargets: TriggeredTransactionEventTarget[] = []
+          for (const target of activeTargets) {
+            const reservation = OCPP20ServiceUtils.reserveTriggeredTransactionEventDelivery(
+              chargingStation,
+              target.connectorId,
+              target.evseId,
+              target.transactionId
+            )
+            if (reservation == null) {
+              for (const reservedTarget of reservedTargets) reservedTarget.reservation.release()
+              return {
+                status: TriggerMessageStatusEnumType.Rejected,
+                statusInfo: {
+                  additionalInfo: 'A TransactionEvent trigger is already pending for a target',
+                  reasonCode: ReasonCodeEnumType.OutOfMemory,
+                },
+              }
+            }
+            reservedTargets.push({ ...target, reservation })
+          }
+          this.triggerTransactionEventReservations.set(commandPayload, reservedTargets)
+          return { status: TriggerMessageStatusEnumType.Accepted }
+        }
+
+        default:
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.handleRequestTriggerMessage: Unsupported message trigger '${requestedMessage}'`
+          )
+          return {
+            status: TriggerMessageStatusEnumType.NotImplemented,
+            statusInfo: {
+              additionalInfo: `Message trigger '${requestedMessage}' is not implemented`,
+              reasonCode: ReasonCodeEnumType.UnsupportedRequest,
+            },
+          }
+      }
+    } catch (error) {
+      const errorResponse: OCPP20TriggerMessageResponse = {
+        status: TriggerMessageStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'Internal error occurred while processing trigger message request',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20TriggerMessageResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.TRIGGER_MESSAGE,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  private async handleRequestUnlockConnector (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20UnlockConnectorRequest
+  ): Promise<OCPP20UnlockConnectorResponse> {
+    try {
+      const { connectorId, evseId } = commandPayload
+
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestUnlockConnector: UnlockConnector received for EVSE ${evseId.toString()} connector ${connectorId.toString()}`
+      )
+
+      if (!chargingStation.hasEvses) {
+        return {
+          status: UnlockStatusEnumType.UnknownConnector,
+          statusInfo: {
+            additionalInfo: 'Charging station does not support EVSEs',
+            reasonCode: ReasonCodeEnumType.UnsupportedRequest,
+          },
+        }
+      }
+
+      if (!chargingStation.hasEvse(evseId)) {
+        return {
+          status: UnlockStatusEnumType.UnknownConnector,
+          statusInfo: {
+            additionalInfo: `EVSE ${evseId.toString()} does not exist`,
+            reasonCode: ReasonCodeEnumType.UnknownEvse,
+          },
+        }
+      }
+
+      const evseStatus = chargingStation.getEvseStatus(evseId)
+      if (evseStatus?.connectors.has(connectorId) !== true) {
+        return {
+          status: UnlockStatusEnumType.UnknownConnector,
+          statusInfo: {
+            additionalInfo: `Connector ${connectorId.toString()} does not exist on EVSE ${evseId.toString()}`,
+            reasonCode: ReasonCodeEnumType.UnknownConnectorId,
+          },
+        }
+      }
+
+      // F05.FR.02: Check for ongoing authorized transaction on the specified connector
+      const targetConnector = evseStatus.connectors.get(connectorId)
+      if (targetConnector?.transactionId != null) {
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestUnlockConnector: Ongoing authorized transaction on connector ${connectorId.toString()} of EVSE ${evseId.toString()}`
+        )
+        return {
+          status: UnlockStatusEnumType.OngoingAuthorizedTransaction,
+          statusInfo: {
+            additionalInfo: `Connector ${connectorId.toString()} on EVSE ${evseId.toString()} has an ongoing authorized transaction`,
+            reasonCode: ReasonCodeEnumType.TxInProgress,
+          },
+        }
+      }
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestUnlockConnector: Unlocking connector ${connectorId.toString()} on EVSE ${evseId.toString()}`
+      )
+
+      await sendAndSetConnectorStatus(
+        chargingStation,
+        { connectorId, connectorStatus: ConnectorStatusEnum.Available, evseId },
+        {
+          isOperationCurrent: () => this.isIncomingRequestDeliveryCurrent(chargingStation),
+          send: true,
+        }
+      )
+
+      if (!this.isIncomingRequestDeliveryCurrent(chargingStation)) {
+        return {
+          status: UnlockStatusEnumType.UnlockFailed,
+          statusInfo: {
+            additionalInfo: 'UnlockConnector request lifecycle is no longer current',
+            reasonCode: ReasonCodeEnumType.InternalError,
+          },
+        }
+      }
+      chargingStation.unlockConnector(connectorId)
+      return { status: UnlockStatusEnumType.Unlocked }
+    } catch (error) {
+      const errorResponse: OCPP20UnlockConnectorResponse = {
+        status: UnlockStatusEnumType.UnlockFailed,
+        statusInfo: {
+          additionalInfo: 'Internal error occurred while processing unlock connector request',
+          reasonCode: ReasonCodeEnumType.InternalError,
+        },
+      }
+      return (
+        handleIncomingRequestError<OCPP20UnlockConnectorResponse>(
+          chargingStation,
+          OCPP20IncomingRequestCommand.UNLOCK_CONNECTOR,
+          ensureError(error),
+          { errorResponse }
+        ) ?? errorResponse
+      )
+    }
+  }
+
+  /**
+   * Handles OCPP 2.0.1 UpdateFirmware request from central system.
+   * Accepts the firmware update request and simulates the firmware update lifecycle
+   * by sending FirmwareStatusNotification messages through a state machine:
+   * Downloading → Downloaded → [SignatureVerified] → Installing → Installed
+   * @param chargingStation - The charging station instance processing the request
+   * @param commandPayload - UpdateFirmware request payload with firmware details and requestId
+   * @returns UpdateFirmwareResponse with Accepted status
+   */
+  private handleRequestUpdateFirmware (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20UpdateFirmwareRequest
+  ): OCPP20UpdateFirmwareResponse {
+    const { firmware, requestId } = commandPayload
+
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.handleRequestUpdateFirmware: Received UpdateFirmware request with requestId ${requestId.toString()} for location '${firmware.location}'`
+    )
+
+    // Reject malformed signing certificates up front so the firmware update path handles only parsable PEMs
+    if (isNotEmptyString(firmware.signingCertificate)) {
+      if (
+        !hasCertificateManager(chargingStation) ||
+        !chargingStation.certificateManager.validateCertificateFormat(firmware.signingCertificate)
+      ) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestUpdateFirmware: Invalid PEM format for signing certificate`
+        )
+        this.sendSecurityEventNotification(
+          chargingStation,
+          'InvalidFirmwareSigningCertificate',
+          `Invalid signing certificate PEM for requestId ${requestId.toString()}`
+        )
+        return {
+          status: UpdateFirmwareStatusEnumType.InvalidCertificate,
+        }
+      }
+    }
+
+    const hasActiveTransactions = chargingStation
+      .iterateEvses(true)
+      .some(({ evseStatus }) => this.hasEvseActiveTransactions(evseStatus))
+    if (hasActiveTransactions) {
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestUpdateFirmware: Active transactions detected — installation will be deferred until idle`
+      )
+    }
+
+    // Cancel any in-progress firmware update; respond with AcceptedCanceled so the new request starts fresh
+    const stationState = this.getOrCreateStationState(chargingStation)
+    if (stationState.activeFirmwareUpdateAbortController != null) {
+      const previousRequestId = stationState.activeFirmwareUpdateRequestId
+      stationState.activeFirmwareUpdateAbortController.abort()
+      this.resetActiveFirmwareUpdateState(stationState)
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestUpdateFirmware: Canceled previous firmware update (requestId ${String(previousRequestId)})`
+      )
+      return {
+        status: UpdateFirmwareStatusEnumType.AcceptedCanceled,
+      }
+    }
+
+    return {
+      status: UpdateFirmwareStatusEnumType.Accepted,
+    }
+  }
+
+  private hasEvseActiveTransactions (evse: EvseStatus): boolean {
+    for (const connector of evse.connectors.values()) {
+      if (connector.transactionId != null) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Checks if a specific EVSE has any non-expired reservations.
+   * @param evse - The EVSE to check
+   * @returns `true` if any connector on the EVSE has a pending reservation
+   */
+  private hasEvsePendingReservations (evse: EvseStatus): boolean {
+    for (const connector of evse.connectors.values()) {
+      if (hasPendingReservation(connector)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Checks if a specific EVSE has any active transactions.
+   * @param evse - The EVSE to check
+   * @returns `true` if any connector on the EVSE has an active transaction
+   */
+  private hasEvseTransactionOwnership (evse: EvseStatus): boolean {
+    return [...evse.connectors.values()].some(
+      connector =>
+        connector.transactionId != null ||
+        connector.transactionStarted === true ||
+        connector.transactionPending === true ||
+        connector.transactionStarting === true ||
+        isTransactionEnding(connector)
+    )
+  }
+
+  /**
+   * Checks if firmware update is in progress per OCPP 2.0.1 Errata idle definition.
+   * @param chargingStation - The charging station instance
+   * @returns `true` when {@link OCPP20FirmwareStatusEnumType} is any non-terminal value:
+   *   Downloading, Downloaded, Installing, DownloadScheduled, DownloadPaused,
+   *   InstallScheduled, InstallRebooting, or SignatureVerified.
+   */
+  private hasFirmwareUpdateInProgress (chargingStation: ChargingStation): boolean {
+    const firmwareStatus = chargingStation.stationInfo?.firmwareStatus
+    return (
+      firmwareStatus === OCPP20FirmwareStatusEnumType.Downloading ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.Downloaded ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.Installing ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.DownloadScheduled ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.DownloadPaused ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.InstallScheduled ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.InstallRebooting ||
+      firmwareStatus === OCPP20FirmwareStatusEnumType.SignatureVerified
+    )
+  }
+
+  private hasPendingTransactionEvents (
+    chargingStation: ChargingStation,
+    transactionId?: string
+  ): boolean {
+    for (const { connectorStatus } of chargingStation.iterateConnectors()) {
+      if (this.connectorHasPendingTransactionEvents(connectorStatus, transactionId)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private hasTriggeredTransactionState (connectorStatus: ConnectorStatus): boolean {
+    return (
+      connectorStatus.transactionId != null ||
+      connectorStatus.transactionStarted === true ||
+      connectorStatus.transactionStarting === true ||
+      connectorStatus.transactionPending === true ||
+      connectorStatus.transactionEnding === true ||
+      connectorStatus.transactionRestored === true
+    )
+  }
+
+  private isAuthorizedToStopTransaction (
+    chargingStation: ChargingStation,
+    connectorId: number,
+    presentedIdToken: OCPP20IdTokenType,
+    presentedGroupIdToken?: OCPP20IdTokenType
+  ): boolean {
+    const connectorStatus = chargingStation.getConnectorStatus(connectorId)
+    if (
+      connectorStatus?.transactionStarted !== true &&
+      connectorStatus?.transactionPending !== true
+    ) {
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.isAuthorizedToStopTransaction: No active transaction on connector ${connectorId.toString()}`
+      )
+      return false
+    }
+
+    // C01.FR.03(a): Same idToken as the one used to start the transaction
+    if (presentedIdToken.idToken === connectorStatus.transactionIdTag) {
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.isAuthorizedToStopTransaction: Same idToken as start token - authorized locally`
+      )
+      return true
+    }
+
+    // C01.FR.03(b) / C09.FR.03 / C09.FR.07:
+    // Different valid idToken with same GroupIdToken as start → authorize locally
+    if (
+      connectorStatus.transactionGroupIdToken != null &&
+      presentedGroupIdToken?.idToken != null &&
+      presentedGroupIdToken.idToken === connectorStatus.transactionGroupIdToken
+    ) {
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.isAuthorizedToStopTransaction: Same GroupIdToken as start token - authorized locally without AuthorizationRequest`
+      )
+      return true
+    }
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.isAuthorizedToStopTransaction: IdToken '${truncateId(presentedIdToken.idToken)}' not authorized to stop transaction on connector ${connectorId.toString()}`
+    )
+    return false
+  }
+
+  /**
+   * Checks if charging station is idle per OCPP 2.0.1 Errata definition.
+   * Idle means: no active transactions, no firmware update in progress, no pending reservations.
+   * Note: Log uploads and cable lock state are not tracked in the simulator.
+   * @param chargingStation - The charging station instance
+   * @returns `true` if charging station is idle
+   */
+  private isChargingStationIdle (chargingStation: ChargingStation): boolean {
+    return (
+      chargingStation.getNumberOfRunningTransactions() === 0 &&
+      !this.hasFirmwareUpdateInProgress(chargingStation) &&
+      !hasPendingReservations(chargingStation)
+    )
+  }
+
+  /**
+   * Checks if a specific EVSE is idle per OCPP 2.0.1 Errata definition.
+   * Idle means: no active transactions on EVSE, no firmware update in progress, no pending reservations on EVSE.
+   * @param chargingStation - The charging station instance
+   * @param evse - The EVSE to check
+   * @returns `true` if EVSE is idle
+   */
+  private isEvseIdle (chargingStation: ChargingStation, evse: EvseStatus): boolean {
+    return (
+      !this.hasEvseActiveTransactions(evse) &&
+      !this.hasFirmwareUpdateInProgress(chargingStation) &&
+      !this.hasEvsePendingReservations(evse)
+    )
+  }
+
+  private isRemoteStartConnectorAvailable (
+    evseStatus: EvseStatus,
+    connectorStatus: ConnectorStatus
+  ): boolean {
+    return (
+      evseStatus.availability === OCPP20OperationalStatusEnumType.Operative &&
+      connectorStatus.availability === OCPP20OperationalStatusEnumType.Operative &&
+      connectorStatus.status !== ConnectorStatusEnum.Unavailable &&
+      connectorStatus.status !== ConnectorStatusEnum.Faulted
+    )
+  }
+
+  private isRemoteStartConnectorEligible (
+    evseStatus: EvseStatus,
+    connectorStatus: ConnectorStatus
+  ): boolean {
+    return (
+      this.isRemoteStartConnectorAvailable(evseStatus, connectorStatus) &&
+      connectorStatus.transactionStarted !== true &&
+      connectorStatus.transactionPending !== true &&
+      connectorStatus.transactionStarting !== true &&
+      !isTransactionEnding(connectorStatus) &&
+      connectorStatus.locked !== true
+    )
+  }
+
+  private isReservedTriggeredTransactionCurrent (
+    connectorStatus: ConnectorStatus,
+    transactionId: string
+  ): boolean {
+    return (
+      connectorStatus.transactionStarted === true &&
+      connectorStatus.transactionPending !== true &&
+      connectorStatus.transactionRestored !== true &&
+      connectorStatus.transactionId?.toString() === transactionId &&
+      !hasQueuedEndedTransactionEvent(connectorStatus, transactionId)
+    )
+  }
+
+  private isTriggeredTransactionActive (
+    connectorStatus: ConnectorStatus,
+    transactionId?: string
+  ): boolean {
+    return (
+      connectorStatus.transactionStarted === true &&
+      connectorStatus.transactionPending !== true &&
+      connectorStatus.transactionRestored !== true &&
+      !isTransactionEnding(connectorStatus) &&
+      connectorStatus.transactionId != null &&
+      (transactionId == null || connectorStatus.transactionId.toString() === transactionId)
+    )
+  }
+
+  private isValidFirmwareLocation (location: string): boolean {
+    try {
+      const url = new URL(location)
+      return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'ftp:'
+    } catch {
+      return false
+    }
+  }
+
+  // eslint-disable-next-line perfectionist/sort-classes
+  private isResetLifecycleCurrent (
+    chargingStation: ChargingStation,
+    lifecycleSignal: AbortSignal
+  ): boolean {
+    return chargingStation.lifecycleAbortSignal === lifecycleSignal && !lifecycleSignal.aborted
+  }
+
+  private releaseReportDataReservation (
+    chargingStation: ChargingStation,
+    stationState: OCPP20StationState,
+    requestId: number
+  ): void {
+    const reservation = stationState.reportDataReservations.get(requestId)
+    if (reservation == null) {
+      stationState.reportDataCache.delete(requestId)
+      return
+    }
+    stationState.reportDataReservations.delete(requestId)
+    stationState.reportDataCache.delete(requestId)
+    reservation.release()
+  }
+
+  private resetActiveFirmwareUpdateState (stationState: OCPP20StationState): void {
+    stationState.activeFirmwareUpdateAbortController = undefined
+    stationState.activeFirmwareUpdateRequestId = undefined
+  }
+
+  private resetActiveLogUploadState (stationState: OCPP20StationState): void {
+    stationState.activeLogUploadAbortController = undefined
+    stationState.activeLogUploadRequestId = undefined
+    stationState.activeLogUploadStatus = undefined
+  }
+
+  /**
+   * Reset connector status on start transaction error
+   * @param chargingStation - The charging station instance
+   * @param connectorId - The connector ID that needs rollback
+   * @param evseId - The EVSE ID
+   * @param expectedTransactionId - Transaction identity that still owns the provisional state
+   */
+  private async resetConnectorOnStartTransactionError (
+    chargingStation: ChargingStation,
+    connectorId: number,
+    evseId?: number,
+    expectedTransactionId?: string
+  ): Promise<void> {
+    const connectorStatus = chargingStation.getConnectorStatus(connectorId, evseId)
+    if (
+      expectedTransactionId != null &&
+      connectorStatus?.transactionId?.toString() !== expectedTransactionId
+    ) {
+      return
+    }
+    OCPP20ServiceUtils.stopUpdatedMeterValues(chargingStation, connectorId, evseId)
+    // Snapshot transactionId BEFORE resetConnectorStatus deletes it.
+    const txId = connectorStatus?.transactionId
+    resetConnectorStatus(connectorStatus)
+    chargingStation.destroyCoherentSession(txId)
+    await restoreConnectorStatus(chargingStation, connectorId, connectorStatus, evseId)
+  }
+
+  /**
+   * Resolve the connectors carrying an active transaction within the trigger
+   * scope. When an EVSE is specified, only that EVSE's connectors are
+   * considered; when the EVSE field is absent, all EVSEs are considered
+   * (F06.FR.11 — "for all allowed evse values").
+   *
+   * The predicate requires `transactionStarted === true` and deliberately
+   * excludes pending or ending transactions, including restored state with a
+   * matching queued Ended event. Only a started, non-ending transaction yields
+   * `chargingState = Charging`, which F06.FR.07 and the OCPP 2.0.1
+   * conformance test cases TC_F_13/TC_F_14 mandate for the triggered
+   * TransactionEventRequest.
+   * @param chargingStation - Target charging station.
+   * @param evse - Optional EVSE scope from the TriggerMessageRequest.
+   * @returns The connector, EVSE, and transaction identity of each active transaction within the trigger scope.
+   * @see {@link hasEvseActiveTransactions} for the looser presence-only predicate used elsewhere.
+   */
+  private resolveActiveTransactionConnectors (
+    chargingStation: ChargingStation,
+    evse: OCPP20TriggerMessageRequest['evse']
+  ): { connectorId: number; evseId: number; transactionId: string }[] {
+    const activeConnectors: { connectorId: number; evseId: number; transactionId: string }[] = []
+    for (const { connectorId, connectorStatus, evseId } of this.resolveTriggerMessageConnectors(
+      chargingStation,
+      evse
+    )) {
+      if (
+        connectorStatus.transactionStarted === true &&
+        connectorStatus.transactionPending !== true &&
+        connectorStatus.transactionRestored !== true &&
+        !isTransactionEnding(connectorStatus) &&
+        connectorStatus.transactionId != null
+      ) {
+        activeConnectors.push({
+          connectorId,
+          evseId,
+          transactionId: connectorStatus.transactionId.toString(),
+        })
+      }
+    }
+    return activeConnectors
+  }
+
+  private resolveMeterValuesTriggerEvseIds (
+    chargingStation: ChargingStation,
+    evse: OCPP20TriggerMessageRequest['evse']
+  ): number[] {
+    if (evse?.id != null && evse.id > 0) return [evse.id]
+    return [...chargingStation.iterateEvses(true)].map(({ evseId }) => evseId)
+  }
+
+  /**
+   * Resolves physical connectors within the requested TriggerMessage scope.
+   * @param chargingStation - Target charging station.
+   * @param evse - Optional EVSE and connector scope.
+   * @returns Every connector in the requested scope.
+   */
+  private resolveTriggerMessageConnectors (
+    chargingStation: ChargingStation,
+    evse: OCPP20TriggerMessageRequest['evse']
+  ): TriggerMessageConnectorTarget[] {
+    if (evse?.id != null && evse.id > 0) {
+      const evseStatus = chargingStation.getEvseStatus(evse.id)
+      if (evseStatus == null) return []
+      if (evse.connectorId != null) {
+        const connectorStatus = evseStatus.connectors.get(evse.connectorId)
+        return connectorStatus == null
+          ? []
+          : [{ connectorId: evse.connectorId, connectorStatus, evseId: evse.id }]
+      }
+      return [...evseStatus.connectors.entries()]
+        .filter(([connectorId]) => connectorId > 0)
+        .map(([connectorId, connectorStatus]) => ({
+          connectorId,
+          connectorStatus,
+          evseId: evse.id,
+        }))
+    }
+    return [...chargingStation.iterateConnectors(true)].flatMap(
+      ({ connectorId, connectorStatus, evseId }) =>
+        evseId == null ? [] : [{ connectorId, connectorStatus, evseId }]
+    )
+  }
+
+  /**
+   * Saves current connector statuses before Inoperative is applied, for later restoration.
+   * @param chargingStation - The charging station instance
+   * @param evseId - Optional EVSE ID to scope the save; if omitted, saves all EVSEs
+   * @param connectorId - Optional connector ID to scope the save within one EVSE
+   */
+  private savePreInoperativeStatuses (
+    chargingStation: ChargingStation,
+    evseId?: number,
+    connectorId?: number
+  ): void {
+    const stationState = this.getOrCreateStationState(chargingStation)
+    const evseIds =
+      evseId != null && evseId > 0
+        ? [evseId]
+        : chargingStation
+          .iterateEvses(true)
+          .map(({ evseId }) => evseId)
+          .toArray()
+    for (const id of evseIds) {
+      const evseStatus = chargingStation.getEvseStatus(id)
+      if (evseStatus != null) {
+        for (const [currentConnectorId, connector] of evseStatus.connectors) {
+          if (connectorId != null && currentConnectorId !== connectorId) continue
+          const connectorKey = `${id.toString()}:${currentConnectorId.toString()}`
+          if (
+            connector.status != null &&
+            isOCPP20ConnectorStatus(connector.status) &&
+            !stationState.preInoperativeConnectorStatuses.has(connectorKey)
+          ) {
+            stationState.preInoperativeConnectorStatuses.set(connectorKey, connector.status)
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Schedules EVSE reset with optional transaction termination
+   * @param chargingStation - The charging station instance
+   * @param evseId - The EVSE identifier to reset
+   * @param hasActiveTransactions - Whether there are active transactions to handle
+   * @param lifecycleSignal - Lifecycle that owns the delivered Reset response
+   */
+  private scheduleEvseReset (
+    chargingStation: ChargingStation,
+    evseId: number,
+    hasActiveTransactions: boolean,
+    lifecycleSignal: AbortSignal
+  ): void {
+    if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+    this.sendEvseStatusNotifications(
+      chargingStation,
+      evseId,
+      OCPP20ConnectorStatusEnumType.Unavailable
+    )
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.scheduleEvseReset: Executing EVSE ${evseId.toString()} reset${hasActiveTransactions ? ' after transaction termination' : ''}`
+    )
+    // Unref: fire-and-forget pending EVSE reset must not block node.js exit.
+    setTimeout(() => {
+      if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) return
+      const evse = chargingStation.getEvseStatus(evseId)
+      if (evse != null) {
+        for (const [connectorId] of evse.connectors) {
+          const connectorStatus = chargingStation.getConnectorStatus(connectorId, evseId)
+          restoreConnectorStatus(chargingStation, connectorId, connectorStatus, evseId).catch(
+            (error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.scheduleEvseReset: Error restoring connector ${connectorId.toString()} status:`,
+                error
+              )
+            }
+          )
+        }
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.scheduleEvseReset: EVSE ${evseId.toString()} reset completed`
+        )
+      }
+    }, OCPP20Constants.RESET_DELAY_MS).unref()
+  }
+
+  /**
+   * Schedules EVSE reset on idle (when no active transactions)
+   * @param chargingStation - The charging station instance
+   * @param evseId - The EVSE identifier to reset
+   * @param lifecycleSignal - Lifecycle that owns the delivered Reset response
+   */
+  private scheduleEvseResetOnIdle (
+    chargingStation: ChargingStation,
+    evseId: number,
+    lifecycleSignal: AbortSignal
+  ): void {
+    // Unref: idle-monitor poll must not block node.js exit; the interval
+    // self-clears once the EVSE is idle, its state is gone, or its lifecycle is superseded.
+    const monitorInterval = setInterval(() => {
+      if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) {
+        clearInterval(monitorInterval)
+        return
+      }
+      const evse = chargingStation.getEvseStatus(evseId)
+      if (evse != null) {
+        if (this.isEvseIdle(chargingStation, evse)) {
+          clearInterval(monitorInterval)
+          logger.info(
+            `${chargingStation.logPrefix()} ${moduleName}.scheduleEvseResetOnIdle: EVSE ${evseId.toString()} is now idle, executing reset`
+          )
+          this.scheduleEvseReset(chargingStation, evseId, false, lifecycleSignal)
+        }
+      } else {
+        clearInterval(monitorInterval)
+      }
+    }, OCPP20Constants.RESET_IDLE_MONITOR_INTERVAL_MS).unref()
+  }
+
+  /**
+   * Schedules charging station reset on idle (when no active transactions)
+   * @param chargingStation - The charging station instance
+   * @param lifecycleSignal - Lifecycle that owns the delivered Reset response
+   */
+  private scheduleResetOnIdle (
+    chargingStation: ChargingStation,
+    lifecycleSignal: AbortSignal
+  ): void {
+    // Unref: idle-monitor poll must not block node.js exit; the interval
+    // self-clears once the station reports idle or its lifecycle is superseded.
+    const monitorInterval = setInterval(() => {
+      if (!this.isResetLifecycleCurrent(chargingStation, lifecycleSignal)) {
+        clearInterval(monitorInterval)
+        return
+      }
+      if (this.isChargingStationIdle(chargingStation)) {
+        clearInterval(monitorInterval)
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.scheduleResetOnIdle: Charging station is now idle, executing reset`
+        )
+        chargingStation.reset(StopTransactionReason.REMOTE).catch((error: unknown) => {
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.scheduleResetOnIdle: Error during scheduled reset:`,
+            error
+          )
+        })
+      }
+    }, OCPP20Constants.RESET_IDLE_MONITOR_INTERVAL_MS).unref()
+  }
+
+  private selectRemoteStartConnector (
+    chargingStation: ChargingStation,
+    requestedEvseId?: number
+  ): RemoteStartConnectorTarget | undefined {
+    for (const { evseId, evseStatus } of chargingStation.iterateEvses(true)) {
+      if (requestedEvseId != null && evseId !== requestedEvseId) continue
+      if (this.hasEvseTransactionOwnership(evseStatus)) continue
+      for (const [connectorId, connectorStatus] of evseStatus.connectors) {
+        if (connectorId > 0 && this.isRemoteStartConnectorEligible(evseStatus, connectorStatus)) {
+          return { connectorId, connectorStatus, evseId, evseStatus }
+        }
+      }
+    }
+    return undefined
+  }
+
+  private sendAllConnectorsStatusNotifications (
+    chargingStation: ChargingStation,
+    status: OCPP20ConnectorStatusEnumType
+  ): void {
+    for (const { connectorId, evseId } of chargingStation.iterateConnectors(true)) {
+      sendAndSetConnectorStatus(chargingStation, {
+        connectorId,
+        connectorStatus: status,
+        ...(evseId != null && { evseId }),
+      }).catch((error: unknown) => {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.sendAllConnectorsStatusNotifications: Error sending status notification for connector ${connectorId.toString()}:`,
+          error
+        )
+      })
+    }
+  }
+
+  /**
+   * Sends status notifications for all connectors on the specified EVSE
+   * @param chargingStation - The charging station instance
+   * @param evseId - The EVSE identifier
+   * @param status - The connector status to send
+   */
+  private sendEvseStatusNotifications (
+    chargingStation: ChargingStation,
+    evseId: number,
+    status: OCPP20ConnectorStatusEnumType
+  ): void {
+    const evse = chargingStation.getEvseStatus(evseId)
+    if (evse) {
+      for (const [connectorId] of evse.connectors) {
+        sendAndSetConnectorStatus(chargingStation, {
+          connectorId,
+          connectorStatus: status,
+          evseId,
+        }).catch((error: unknown) => {
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.sendEvseStatusNotifications: Error sending status notification for connector ${connectorId.toString()}:`,
+            error
+          )
+        })
+      }
+    }
+  }
+
+  private sendFirmwareStatusNotification (
+    chargingStation: ChargingStation,
+    status: OCPP20FirmwareStatusEnumType,
+    requestId: number
+  ): Promise<OCPP20FirmwareStatusNotificationResponse> {
+    if (chargingStation.stationInfo != null) {
+      chargingStation.stationInfo.firmwareStatus = status
+    }
+    // L01.FR.26 & L02.FR.17 last-sent projection: persistent source of truth for the
+    // trigger case, distinct from `stationInfo.firmwareStatus` (state-machine field reset by #1976).
+    this.getOrCreateStationState(chargingStation).lastFirmwareStatusNotification = {
+      requestId,
+      status,
+    }
+    return chargingStation.ocppRequestService.requestHandler<
+      OCPP20FirmwareStatusNotificationRequest,
+      OCPP20FirmwareStatusNotificationResponse
+    >(chargingStation, OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
+      requestId,
+      status,
+    })
+  }
+
+  private sendLogStatusNotification (
+    chargingStation: ChargingStation,
+    status: UploadLogStatusEnumType,
+    requestId: number
+  ): Promise<OCPP20LogStatusNotificationResponse> {
+    return chargingStation.ocppRequestService.requestHandler<
+      OCPP20LogStatusNotificationRequest,
+      OCPP20LogStatusNotificationResponse
+    >(chargingStation, OCPP20RequestCommand.LOG_STATUS_NOTIFICATION, {
+      requestId,
+      status,
+    })
+  }
+
+  private async sendNotifyCustomerInformation (
+    chargingStation: ChargingStation,
+    requestId: number
+  ): Promise<void> {
+    // Simulator has no persistent customer data, so send empty data.
+    // Uses pagination pattern (seqNo/tbc) consistent with sendNotifyReportRequest.
+    const dataChunks = ['']
+
+    for (let seqNo = 0; seqNo < dataChunks.length; seqNo++) {
+      const isLastChunk = seqNo === dataChunks.length - 1
+
+      const notifyCustomerInformationRequest: OCPP20NotifyCustomerInformationRequest = {
+        data: dataChunks[seqNo],
+        generatedAt: new Date(),
+        requestId,
+        seqNo,
+        tbc: !isLastChunk,
+      }
+
+      await chargingStation.ocppRequestService.requestHandler<
+        OCPP20NotifyCustomerInformationRequest,
+        OCPP20NotifyCustomerInformationResponse
+      >(
+        chargingStation,
+        OCPP20RequestCommand.NOTIFY_CUSTOMER_INFORMATION,
+        notifyCustomerInformationRequest
+      )
+
+      logger.debug(
+        `${chargingStation.logPrefix()} ${moduleName}.sendNotifyCustomerInformation: NotifyCustomerInformation sent seqNo=${seqNo.toString()} for requestId ${requestId.toString()} (tbc=${(!isLastChunk).toString()})`
+      )
+    }
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.sendNotifyCustomerInformation: Completed NotifyCustomerInformation for requestId ${requestId.toString()} in ${dataChunks.length.toString()} message(s)`
+    )
+  }
+
+  private async sendNotifyReportRequest (
+    chargingStation: ChargingStation,
+    request: OCPP20GetBaseReportRequest,
+    response: OCPP20GetBaseReportResponse
+  ): Promise<void> {
+    const stationState = this.getStationState(chargingStation)
+    if (stationState == null) return
+    const lifecycleSignal = chargingStation.lifecycleAbortSignal
+    const reportActionIsCurrent = (): boolean =>
+      stationState.stopped !== true &&
+      this.stationsState.get(chargingStation) === stationState &&
+      chargingStation.lifecycleAbortSignal === lifecycleSignal &&
+      !lifecycleSignal.aborted &&
+      this.isIncomingRequestDeliveryCurrent(chargingStation)
+    const { reportBase, requestId } = request
+    const cached = stationState.reportDataCache.get(requestId)
+    const reportData = cached ?? this.buildReportData(chargingStation, reportBase)
+
+    try {
+      if (!reportActionIsCurrent()) return
+      const chunks = []
+      for (let i = 0; i < reportData.length; i += MAX_ITEMS_PER_REPORT_MESSAGE) {
+        chunks.push(reportData.slice(i, i + MAX_ITEMS_PER_REPORT_MESSAGE))
+      }
+
+      if (!isNotEmptyArray(chunks)) {
+        chunks.push(undefined)
+      }
+
+      for (let seqNo = 0; seqNo < chunks.length; seqNo++) {
+        if (!reportActionIsCurrent()) return
+        const isLastChunk = seqNo === chunks.length - 1
+        const chunk = chunks[seqNo]
+
+        const notifyReportRequest: OCPP20NotifyReportRequest = {
+          generatedAt: new Date(),
+          requestId,
+          seqNo,
+          tbc: !isLastChunk,
+          ...(chunk !== undefined && isNotEmptyArray(chunk) && { reportData: chunk }),
+        }
+
+        if (!reportActionIsCurrent()) return
+        await chargingStation.ocppRequestService.requestHandler<
+          OCPP20NotifyReportRequest,
+          OCPP20NotifyReportResponse
+        >(chargingStation, OCPP20RequestCommand.NOTIFY_REPORT, notifyReportRequest)
+        if (!reportActionIsCurrent()) return
+
+        logger.debug(
+          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+          `${chargingStation.logPrefix()} ${moduleName}.sendNotifyReportRequest: NotifyReport sent seqNo=${seqNo} for requestId ${requestId} with ${chunk?.length ?? 0} report items (tbc=${!isLastChunk})`
+        )
+      }
+
+      logger.debug(
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        `${chargingStation.logPrefix()} ${moduleName}.sendNotifyReportRequest: Completed NotifyReport for requestId ${requestId} with ${reportData.length} total items in ${chunks.length} message(s)`
+      )
+    } finally {
+      this.releaseReportDataReservation(chargingStation, stationState, requestId)
+    }
+  }
+
+  private sendQueuedSecurityEvents (chargingStation: ChargingStation): void {
+    // Silent-drop when no state entry exists or the entry is sealed
+    // stopped: covers a fired-before-cancel race on the unref'd retry
+    // setTimeout scheduled below.
+    const stationState = this.getStationState(chargingStation)
+    if (stationState == null || stationState.stopped === true) {
+      return
+    }
+    if (
+      stationState.isDrainingSecurityEvents ||
+      !chargingStation.isWebSocketConnectionOpened() ||
+      !isNotEmptyArray(stationState.securityEventQueue)
+    ) {
+      return
+    }
+    stationState.isDrainingSecurityEvents = true
+    const queue = stationState.securityEventQueue
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.sendQueuedSecurityEvents: Draining ${queue.length.toString()} queued security event(s)`
+    )
+    const drainNextEvent = (): void => {
+      if (
+        stationState.stopped === true ||
+        !isNotEmptyArray(queue) ||
+        !chargingStation.isWebSocketConnectionOpened()
+      ) {
+        stationState.isDrainingSecurityEvents = false
+        return
+      }
+      const event = queue.shift()
+      if (event == null) {
+        stationState.isDrainingSecurityEvents = false
+        return
+      }
+      chargingStation.ocppRequestService
+        .requestHandler<
+          OCPP20SecurityEventNotificationRequest,
+          OCPP20SecurityEventNotificationResponse
+        >(chargingStation, OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION, {
+          timestamp: event.timestamp,
+          type: event.type,
+          ...(event.techInfo !== undefined && { techInfo: event.techInfo }),
+        })
+        .then(() => {
+          drainNextEvent()
+          return undefined
+        })
+        .catch((error: unknown) => {
+          if (stationState.stopped === true) {
+            return
+          }
+          const retryCount = (event.retryCount ?? 0) + 1
+          if (retryCount >= OCPP20Constants.MAX_SECURITY_EVENT_SEND_ATTEMPTS) {
+            logger.warn(
+              `${chargingStation.logPrefix()} ${moduleName}.sendQueuedSecurityEvents: Discarding event '${event.type}' after ${retryCount.toString()} failed attempts`,
+              error
+            )
+            drainNextEvent()
+            return
+          }
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.sendQueuedSecurityEvents: Failed to send queued event '${event.type}' (attempt ${retryCount.toString()}/${OCPP20Constants.MAX_SECURITY_EVENT_SEND_ATTEMPTS.toString()})`,
+            error
+          )
+          queue.unshift({ ...event, retryCount })
+          stationState.isDrainingSecurityEvents = false
+          // Store the retry handle on `stationState` so
+          // `resetStationState` can cancel it on `stop()`.
+          // Cancel any previously scheduled retry first. Unref:
+          // fire-and-forget retry must not block node.js exit.
+          this.cancelSecurityEventRetryTimer(stationState)
+          stationState.securityEventRetryTimer = setTimeout(() => {
+            // Self-clear before the recursive call: a subsequent retry
+            // must not observe a stale reference.
+            delete stationState.securityEventRetryTimer
+            this.sendQueuedSecurityEvents(chargingStation)
+          }, OCPP20Constants.SECURITY_EVENT_RETRY_DELAY_MS).unref()
+        })
+    }
+    drainNextEvent()
+  }
+
+  private sendRestoredAllConnectorsStatusNotifications (chargingStation: ChargingStation): void {
+    for (const { connectorId, evseId } of chargingStation.iterateConnectors(true)) {
+      if (evseId == null) continue
+      const restoredStatus = this.getRestoredConnectorStatus(chargingStation, evseId, connectorId)
+      sendAndSetConnectorStatus(chargingStation, {
+        connectorId,
+        connectorStatus: restoredStatus,
+        evseId,
+      }).catch((error: unknown) => {
+        logger.error(
+          `${chargingStation.logPrefix()} ${moduleName}.sendRestoredAllConnectorsStatusNotifications: Error sending status notification for connector ${connectorId.toString()}:`,
+          error
+        )
+      })
+    }
+  }
+
+  private sendRestoredEvseStatusNotifications (
+    chargingStation: ChargingStation,
+    evseId: number
+  ): void {
+    const evse = chargingStation.getEvseStatus(evseId)
+    if (evse) {
+      for (const [connectorId] of evse.connectors) {
+        const restoredStatus = this.getRestoredConnectorStatus(chargingStation, evseId, connectorId)
+        sendAndSetConnectorStatus(chargingStation, {
+          connectorId,
+          connectorStatus: restoredStatus,
+          evseId,
+        }).catch((error: unknown) => {
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.sendRestoredEvseStatusNotifications: Error sending status notification for connector ${connectorId.toString()}:`,
+            error
+          )
+        })
+      }
+    }
+  }
+
+  private sendSecurityEventNotification (
+    chargingStation: ChargingStation,
+    type: string,
+    techInfo?: string
+  ): void {
+    // Lifecycle-entry: state may not exist yet on the first invalid-cert
+    // request. Drop only when already sealed stopped.
+    const stationState = this.getOrCreateStationState(chargingStation)
+    if (stationState.stopped === true) {
+      return
+    }
+    logger.info(
+      `${chargingStation.logPrefix()} ${moduleName}.sendSecurityEventNotification: [SecurityEvent] type=${type}${techInfo != null ? `, techInfo=${techInfo}` : ''}`
+    )
+    stationState.securityEventQueue.push({
+      timestamp: new Date(),
+      type,
+      ...(techInfo !== undefined && { techInfo }),
+    })
+    this.sendQueuedSecurityEvents(chargingStation)
+  }
+
+  /**
+   * Simulates a firmware update lifecycle through status progression per OCPP 2.0.1 L01/L02.
+   * Sequence: [DownloadScheduled] → Downloading → Downloaded/DownloadFailed →
+   *           [SignatureVerified] → [InstallScheduled] → Installing → Installed
+   * @param chargingStation - The charging station instance
+   * @param requestId - The request ID from the UpdateFirmware request
+   * @param firmware - The firmware details including location, dates, and optional signature
+   * @param retries - Number of download retry attempts before reporting DownloadFailed (L01.FR.30)
+   * @param retryInterval - Seconds between download retry attempts
+   */
+  private async simulateFirmwareUpdateLifecycle (
+    chargingStation: ChargingStation,
+    requestId: number,
+    firmware: FirmwareType,
+    retries?: number,
+    retryInterval?: number
+  ): Promise<void> {
+    const { installDateTime, location, retrieveDateTime, signature } = firmware
+
+    const stationState = this.getOrCreateStationState(chargingStation)
+    // Silent-drop late `.on(UPDATE_FIRMWARE).catch(...)` dispatch after
+    // `stop()`: the sealed state must not drive the async lifecycle
+    // nor clobber `activeFirmwareUpdateAbortController`.
+    if (stationState.stopped === true) {
+      return
+    }
+    // Store the abort controller so a subsequent UpdateFirmware can abort this in-progress update
+    const abortController = new AbortController()
+    stationState.activeFirmwareUpdateAbortController = abortController
+    stationState.activeFirmwareUpdateRequestId = requestId
+
+    const checkAborted = (): boolean => abortController.signal.aborted
+
+    // Lifecycle-stage tracker for the finally-block terminal-status reset
+    // (issue #1969): advances only on actual lifecycle advancement, never on
+    // error/abort branches.
+    //   'download'  → still in the download/verify stage (initial)
+    //   'install'   → Installing notification succeeded, install stage entered
+    //   'installed' → Installed notification succeeded, lifecycle reached success
+    let stage: FirmwareStage = 'download'
+
+    try {
+      // Delay the download until retrieveDateTime; inform the CSMS via DownloadScheduled first
+      const now = Date.now()
+      const retrieveTime = convertToDate(retrieveDateTime)?.getTime() ?? now
+      if (retrieveTime > now) {
+        await this.sendFirmwareStatusNotification(
+          chargingStation,
+          OCPP20FirmwareStatusEnumType.DownloadScheduled,
+          requestId
+        )
+        await interruptibleSleep(retrieveTime - now, abortController.signal)
+        if (checkAborted()) return
+      }
+
+      await this.sendFirmwareStatusNotification(
+        chargingStation,
+        OCPP20FirmwareStatusEnumType.Downloading,
+        requestId
+      )
+
+      await interruptibleSleep(OCPP20Constants.FIRMWARE_STATUS_DELAY_MS, abortController.signal)
+      if (checkAborted()) return
+
+      // Empty or malformed firmware location: simulate the L01.FR.30 download retries, then emit DownloadFailed and stop
+      if (isEmpty(location) || !this.isValidFirmwareLocation(location)) {
+        // L01.FR.30: Simulate download retries before reporting DownloadFailed
+        const maxRetries = retries ?? 0
+        const retryDelayMs = secondsToMilliseconds(retryInterval ?? 0)
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.simulateFirmwareUpdateLifecycle: Download failed for requestId ${requestId.toString()} - invalid location '${location}' (attempt ${attempt.toString()}/${maxRetries.toString()}, retrying in ${retryInterval?.toString() ?? '0'}s)`
+          )
+          await interruptibleSleep(retryDelayMs, abortController.signal)
+          if (checkAborted()) return
+          await this.sendFirmwareStatusNotification(
+            chargingStation,
+            OCPP20FirmwareStatusEnumType.Downloading,
+            requestId
+          )
+          await interruptibleSleep(OCPP20Constants.FIRMWARE_STATUS_DELAY_MS, abortController.signal)
+          if (checkAborted()) return
+        }
+        await this.sendFirmwareStatusNotification(
+          chargingStation,
+          OCPP20FirmwareStatusEnumType.DownloadFailed,
+          requestId
+        )
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.simulateFirmwareUpdateLifecycle: Download failed for requestId ${requestId.toString()} - invalid location '${location}'${maxRetries > 0 ? ` (exhausted ${maxRetries.toString()} retries)` : ''}`
+        )
+        return
+      }
+
+      await this.sendFirmwareStatusNotification(
+        chargingStation,
+        OCPP20FirmwareStatusEnumType.Downloaded,
+        requestId
+      )
+
+      if (signature != null) {
+        await interruptibleSleep(OCPP20Constants.FIRMWARE_VERIFY_DELAY_MS, abortController.signal)
+        if (checkAborted()) return
+
+        // L01.FR.04: Simulate signature verification
+        const simulateFailure = OCPP20ServiceUtils.readVariableAsBoolean(
+          chargingStation,
+          OCPP20ComponentName.FirmwareCtrlr,
+          OCPP20VendorVariableName.SimulateSignatureVerificationFailure,
+          false
+        )
+
+        if (simulateFailure) {
+          // L01.FR.03: InvalidSignature + SecurityEventNotification
+          await this.sendFirmwareStatusNotification(
+            chargingStation,
+            OCPP20FirmwareStatusEnumType.InvalidSignature,
+            requestId
+          )
+          this.sendSecurityEventNotification(
+            chargingStation,
+            'InvalidFirmwareSignature',
+            `Firmware signature verification failed for requestId ${requestId.toString()}`
+          )
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.simulateFirmwareUpdateLifecycle: Firmware signature verification failed for requestId ${requestId.toString()} (simulated)`
+          )
+          return
+        }
+
+        await this.sendFirmwareStatusNotification(
+          chargingStation,
+          OCPP20FirmwareStatusEnumType.SignatureVerified,
+          requestId
+        )
+      }
+
+      // Delay the install until installDateTime; inform the CSMS via InstallScheduled first
+      if (installDateTime != null) {
+        const currentTime = Date.now()
+        const installTime = convertToDate(installDateTime)?.getTime() ?? currentTime
+        if (installTime > currentTime) {
+          await this.sendFirmwareStatusNotification(
+            chargingStation,
+            OCPP20FirmwareStatusEnumType.InstallScheduled,
+            requestId
+          )
+          await interruptibleSleep(installTime - currentTime, abortController.signal)
+          if (checkAborted()) return
+        }
+      }
+
+      // L01.FR.06: Wait for active transactions to end before installing
+      // L01.FR.07: Set idle connectors to Unavailable when AllowNewSessionsPendingFirmwareUpdate is false/absent
+      const hasActiveTransactionsBeforeInstall = chargingStation
+        .iterateEvses(true)
+        .some(({ evseStatus }) => this.hasEvseActiveTransactions(evseStatus))
+      if (hasActiveTransactionsBeforeInstall) {
+        const allowNewSessions = OCPP20ServiceUtils.readVariableAsBoolean(
+          chargingStation,
+          OCPP20ComponentName.ChargingStation,
+          'AllowNewSessionsPendingFirmwareUpdate',
+          false
+        )
+        while (
+          !checkAborted() &&
+          chargingStation
+            .iterateEvses(true)
+            .some(({ evseStatus }) => this.hasEvseActiveTransactions(evseStatus))
+        ) {
+          // L01.FR.07: Set newly-available EVSE to Unavailable on each iteration
+          if (!allowNewSessions) {
+            for (const { evseId, evseStatus } of chargingStation.iterateEvses(true)) {
+              if (!this.hasEvseActiveTransactions(evseStatus)) {
+                this.sendEvseStatusNotifications(
+                  chargingStation,
+                  evseId,
+                  OCPP20ConnectorStatusEnumType.Unavailable
+                )
+              }
+            }
+          }
+          logger.debug(
+            `${chargingStation.logPrefix()} ${moduleName}.simulateFirmwareUpdateLifecycle: Waiting for active transactions to end before installing (L01.FR.06)`
+          )
+          await interruptibleSleep(
+            OCPP20Constants.FIRMWARE_INSTALL_DELAY_MS,
+            abortController.signal
+          )
+        }
+      }
+      if (checkAborted()) return
+
+      await this.sendFirmwareStatusNotification(
+        chargingStation,
+        OCPP20FirmwareStatusEnumType.Installing,
+        requestId
+      )
+      stage = 'install'
+
+      await interruptibleSleep(OCPP20Constants.RESET_DELAY_MS, abortController.signal)
+      if (checkAborted()) return
+      await this.sendFirmwareStatusNotification(
+        chargingStation,
+        OCPP20FirmwareStatusEnumType.Installed,
+        requestId
+      )
+      stage = 'installed'
+
+      // Send SecurityEventNotification after a successful firmware update
+      this.sendSecurityEventNotification(
+        chargingStation,
+        'FirmwareUpdated',
+        `Firmware update completed for requestId ${requestId.toString()}`
+      )
+
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.simulateFirmwareUpdateLifecycle: Firmware update simulation completed for requestId ${requestId.toString()}`
+      )
+    } finally {
+      // Reset stationInfo.firmwareStatus to a coherent terminal value when the
+      // lifecycle exits before reaching Installed (issue #1969): otherwise any
+      // consumer that does not cross-check activeFirmwareUpdateRequestId would
+      // observe a stale in-progress value. FirmwareStatusEnumType.Idle is
+      // SHALL-restricted to TriggerMessage-triggered notifications, so as a
+      // persistent local state Idle only fits the pre-install baseline: clean
+      // download-phase abort → Idle; clean install-phase abort → InstallationFailed
+      // (spec-recognized for cancellation per L01.FR.24 Note). No
+      // FirmwareStatusNotification is emitted from finally (L01.FR.24 Note MAY
+      // makes the terminal notification optional; L02.FR.15 omits the clause).
+      // Guards (`successorClaimed`, `isExplicitTerminal`) mirror
+      // `clearActiveFirmwareUpdate`'s requestId-supersession pattern and
+      // preserve any explicit terminal already emitted from inside try.
+      const activeRequestId = this.getStationState(chargingStation)?.activeFirmwareUpdateRequestId
+      const successorClaimed = activeRequestId != null && activeRequestId !== requestId
+      const currentStatus = chargingStation.stationInfo?.firmwareStatus
+      const isExplicitTerminal =
+        currentStatus === OCPP20FirmwareStatusEnumType.DownloadFailed ||
+        currentStatus === OCPP20FirmwareStatusEnumType.InstallationFailed ||
+        currentStatus === OCPP20FirmwareStatusEnumType.InvalidSignature
+      if (
+        stage !== 'installed' &&
+        !successorClaimed &&
+        !isExplicitTerminal &&
+        chargingStation.stationInfo != null
+      ) {
+        chargingStation.stationInfo.firmwareStatus =
+          abortController.signal.aborted && stage === 'download'
+            ? OCPP20FirmwareStatusEnumType.Idle
+            : FIRMWARE_STAGE_FAILURE_STATUS[stage]
+      }
+      // Guarantee cleanup on every exit path (happy, abort, throw): without
+      // this, a thrown await would leave activeFirmwareUpdateAbortController
+      // set and any subsequent UpdateFirmware.req would abort a non-existent
+      // in-progress update while the station stays stuck.
+      this.clearActiveFirmwareUpdate(chargingStation, requestId)
+    }
+  }
+
+  /**
+   * Simulates a log upload lifecycle through status progression using chained setTimeout calls.
+   * Sequence: Uploading → Uploaded
+   * @param chargingStation - The charging station instance
+   * @param requestId - The request ID from the GetLog request
+   */
+  private async simulateLogUploadLifecycle (
+    chargingStation: ChargingStation,
+    requestId: number
+  ): Promise<void> {
+    const stationState = this.getOrCreateStationState(chargingStation)
+    // Silent-drop late `.on(GET_LOG).catch(...)` dispatch after
+    // `stop()`; symmetric with `simulateFirmwareUpdateLifecycle`.
+    if (stationState.stopped === true) {
+      return
+    }
+    const abortController = new AbortController()
+    stationState.activeLogUploadAbortController = abortController
+    stationState.activeLogUploadRequestId = requestId
+    stationState.activeLogUploadStatus = UploadLogStatusEnumType.Uploading
+    try {
+      await this.sendLogStatusNotification(
+        chargingStation,
+        UploadLogStatusEnumType.Uploading,
+        requestId
+      )
+
+      await interruptibleSleep(OCPP20Constants.LOG_UPLOAD_STEP_DELAY_MS, abortController.signal)
+      if (!abortController.signal.aborted && stationState.activeLogUploadRequestId === requestId) {
+        stationState.activeLogUploadStatus = UploadLogStatusEnumType.Uploaded
+        await this.sendLogStatusNotification(
+          chargingStation,
+          UploadLogStatusEnumType.Uploaded,
+          requestId
+        )
+
+        logger.info(
+          `${chargingStation.logPrefix()} ${moduleName}.simulateLogUploadLifecycle: Log upload simulation completed for requestId ${requestId.toString()}`
+        )
+      }
+    } finally {
+      this.clearActiveLogUpload(chargingStation, requestId)
+    }
+  }
+
+  /**
+   * Terminates all active transactions on the charging station using OCPP 2.0.1 TransactionEventRequest
+   * @param chargingStation - The charging station instance
+   * @param reason - The reason for transaction termination
+   */
+  private async terminateAllTransactions (
+    chargingStation: ChargingStation,
+    reason: OCPP20ReasonEnumType
+  ): Promise<void> {
+    await OCPP20ServiceUtils.stopAllTransactions(
+      chargingStation,
+      OCPP20TriggerReasonEnumType.ResetCommand,
+      reason
+    )
+  }
+
+  /**
+   * Terminates all active transactions on the specified EVSE using OCPP 2.0.1 TransactionEventRequest
+   * @param chargingStation - The charging station instance
+   * @param evseId - The EVSE identifier to terminate transactions on
+   * @param reason - The reason for transaction termination
+   */
+  private async terminateEvseTransactions (
+    chargingStation: ChargingStation,
+    evseId: number,
+    reason: OCPP20ReasonEnumType
+  ): Promise<void> {
+    await OCPP20ServiceUtils.stopAllTransactions(
+      chargingStation,
+      OCPP20TriggerReasonEnumType.ResetCommand,
+      reason,
+      evseId
+    )
+  }
+
+  /**
+   * OCPP 2.0.1 F06.FR.06: TriggerMessage with `MessageTrigger.MeterValues`
+   * SHALL respond with `MeterValuesRequest` (not `TransactionEventRequest`),
+   * using the `AlignedDataCtrlr.Measurands` allow-list and `TRIGGER`
+   * ReadingContext. One `MeterValuesRequest` is emitted for every EVSE slot
+   * reserved before the TriggerMessage response was accepted.
+   * @param chargingStation - Target charging station.
+   * @param reservation - Exact EVSE batch and transaction deliveries reserved at admission.
+   * @param errorHandler - Handler for downstream request-emission errors.
+   */
+  private triggerMeterValues (
+    chargingStation: ChargingStation,
+    reservation: TriggeredMeterValuesReservation,
+    errorHandler: (error: unknown) => void
+  ): void {
+    for (const target of reservation.targets) {
+      const deliveryTargets = reservation.deliveryTargets.filter(
+        deliveryTarget => deliveryTarget.evseId === target.evseId
+      )
+      const settleDeliveries = (definitivelyRejected: boolean): void => {
+        for (const { delivery } of deliveryTargets) delivery.settle(definitivelyRejected)
+      }
+      ;(async () => {
+        const deliveryTurns = deliveryTargets.flatMap(({ delivery }) => {
+          const deliveryTurn = delivery.waitForTurn()
+          return deliveryTurn == null ? [] : [deliveryTurn]
+        })
+        if (isNotEmptyArray(deliveryTurns)) await Promise.all(deliveryTurns)
+        this.emitEvseMeterValues(chargingStation, target, errorHandler, settleDeliveries)
+      })().catch((error: unknown) => {
+        OCPP20ServiceUtils.releaseTriggeredMeterValuesRequests(chargingStation, [target.evseId])
+        settleDeliveries(true)
+        errorHandler(error)
+      })
+    }
+  }
+
+  private triggerStatusNotification (
+    chargingStation: ChargingStation,
+    evse: OCPP20TriggerMessageRequest['evse'],
+    errorHandler: (error: unknown) => void
+  ): void {
+    for (const { connectorId, connectorStatus, evseId } of this.resolveTriggerMessageConnectors(
+      chargingStation,
+      evse
+    )) {
+      chargingStation.ocppRequestService
+        .requestHandler<StatusNotificationOptions, OCPP20StatusNotificationResponse>(
+          chargingStation,
+          OCPP20RequestCommand.STATUS_NOTIFICATION,
+          {
+            connectorId,
+            connectorStatus: connectorStatus.status ?? ConnectorStatusEnum.Available,
+            evseId,
+          },
+          { skipBufferingOnError: true, triggerMessage: true }
+        )
+        .catch(errorHandler)
+    }
+  }
+
+  /**
+   * Sends the TransactionEvent reserved when TriggerMessage was accepted.
+   * The reservation revalidates the exact active transaction before invoking this method.
+   * @param chargingStation - Target charging station.
+   * @param target - Exact connector and transaction reserved at admission.
+   */
+  private async triggerTransactionEvent (
+    chargingStation: ChargingStation,
+    target: Omit<TriggeredTransactionEventTarget, 'reservation'>
+  ): Promise<void> {
+    const { connectorId, evseId, transactionId } = target
+    const txUpdatedInterval = OCPP20ServiceUtils.getTxUpdatedInterval(chargingStation)
+    const txUpdatedMeasurandsKey = buildConfigKey(
+      OCPP20ComponentName.SampledDataCtrlr,
+      OCPP20RequiredVariableName.TxUpdatedMeasurands
+    )
+    const timestamp = new Date()
+    // F06.FR.10: while the reserved transaction remains active, a message marked
+    // Accepted SHALL be sent. A meterValue build failure must not suppress the
+    // event: `meterValue` is `0..*` while the
+    // `chargingState` (populated by buildTransactionEvent for Updated events)
+    // is the F06.FR.07-mandatory core, so omit the meterValue field on failure.
+    let eventPayload: { meterValue?: [OCPP20MeterValue] } = {}
+    try {
+      const meterValue = OCPP20ServiceUtils.buildTransactionMeterValue(
+        chargingStation,
+        connectorId,
+        evseId,
+        transactionId,
+        txUpdatedInterval,
+        txUpdatedMeasurandsKey,
+        OCPP20ReadingContextEnumType.TRIGGER,
+        timestamp
+      )
+      // OCPP 2.0.1 `MeterValueType.sampledValue` cardinality is `1..*`, while
+      // `TransactionEventRequest.meterValue` is `0..*`: when TxUpdatedMeasurands
+      // yields no sampled values, omit the `meterValue` field entirely rather
+      // than send an empty-wrapper schema violation.
+      if (isNotEmptyArray(meterValue.sampledValue)) {
+        eventPayload = { meterValue: [meterValue] }
+      }
+    } catch (error) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.triggerTransactionEvent: ${getErrorMessage(error)}`
+      )
+    }
+    await OCPP20ServiceUtils.sendTransactionEvent(
+      chargingStation,
+      OCPP20TransactionEventEnumType.Updated,
+      OCPP20TriggerReasonEnumType.Trigger,
+      connectorId,
+      transactionId,
+      { ...eventPayload, evseId, timestamp }
+    )
+  }
+
+  private validateChargingProfile (
+    chargingStation: ChargingStation,
+    chargingProfile: OCPP20ChargingProfileType,
+    evseId: number
+  ): boolean {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Validating charging profile ${chargingProfile.id.toString()} for EVSE ${evseId.toString()}`
+    )
+
+    if (chargingProfile.stackLevel < 0 || chargingProfile.stackLevel > 9) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Invalid stack level ${chargingProfile.stackLevel.toString()}, must be 0-9`
+      )
+      return false
+    }
+
+    if (chargingProfile.id <= 0) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Invalid charging profile ID ${chargingProfile.id.toString()}, must be positive`
+      )
+      return false
+    }
+
+    if (!chargingStation.hasEvses && evseId > 0) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: EVSE ${evseId.toString()} not supported by this charging station`
+      )
+      return false
+    }
+
+    if (chargingStation.hasEvses && !chargingStation.hasEvse(evseId)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: EVSE ${evseId.toString()} does not exist`
+      )
+      return false
+    }
+
+    if (!isNotEmptyArray(chargingProfile.chargingSchedule)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Charging profile must contain at least one charging schedule`
+      )
+      return false
+    }
+
+    const now = new Date()
+    const validFromDate = convertToDate(chargingProfile.validFrom)
+    const validToDate = convertToDate(chargingProfile.validTo)
+    if (validFromDate && validToDate) {
+      if (validFromDate >= validToDate) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: validFrom must be before validTo`
+        )
+        return false
+      }
+    }
+
+    if (validToDate && validToDate <= now) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Charging profile already expired`
+      )
+      return false
+    }
+
+    if (
+      chargingProfile.recurrencyKind &&
+      chargingProfile.chargingProfileKind !== OCPP20ChargingProfileKindEnumType.Recurring
+    ) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: recurrencyKind only valid for Recurring profile kind`
+      )
+      return false
+    }
+
+    if (
+      chargingProfile.chargingProfileKind === OCPP20ChargingProfileKindEnumType.Recurring &&
+      !chargingProfile.recurrencyKind
+    ) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Recurring profile kind requires recurrencyKind`
+      )
+      return false
+    }
+
+    for (const [scheduleIndex, schedule] of chargingProfile.chargingSchedule.entries()) {
+      if (
+        !this.validateChargingSchedule(
+          chargingStation,
+          schedule,
+          scheduleIndex,
+          chargingProfile,
+          evseId
+        )
+      ) {
+        return false
+      }
+    }
+
+    if (!this.validateChargingProfilePurpose(chargingStation, chargingProfile, evseId)) {
+      return false
+    }
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfile: Charging profile ${chargingProfile.id.toString()} validation passed`
+    )
+    return true
+  }
+
+  /**
+   * Validates charging profile purpose-specific business rules
+   * @param chargingStation - The charging station instance
+   * @param chargingProfile - The charging profile to validate
+   * @param evseId - EVSE identifier
+   * @returns `true` if purpose validation passes, `false` otherwise
+   */
+  private validateChargingProfilePurpose (
+    chargingStation: ChargingStation,
+    chargingProfile: OCPP20ChargingProfileType,
+    evseId: number
+  ): boolean {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: Validating purpose-specific rules for profile ${chargingProfile.id.toString()} with purpose ${chargingProfile.chargingProfilePurpose}`
+    )
+
+    switch (chargingProfile.chargingProfilePurpose) {
+      case OCPP20ChargingProfilePurposeEnumType.ChargingStationExternalConstraints:
+        if (evseId !== 0) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: ChargingStationExternalConstraints must apply to EVSE 0, got EVSE ${evseId.toString()}`
+          )
+          return false
+        }
+        break
+
+      case OCPP20ChargingProfilePurposeEnumType.ChargingStationMaxProfile:
+        if (evseId !== 0) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: ChargingStationMaxProfile must apply to EVSE 0, got EVSE ${evseId.toString()}`
+          )
+          return false
+        }
+        break
+
+      case OCPP20ChargingProfilePurposeEnumType.TxDefaultProfile:
+        break
+
+      case OCPP20ChargingProfilePurposeEnumType.TxProfile:
+        if (evseId === 0) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: TxProfile cannot apply to EVSE 0, must target specific EVSE`
+          )
+          return false
+        }
+
+        if (!chargingProfile.transactionId) {
+          logger.debug(
+            `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: TxProfile without transactionId - may be for future use`
+          )
+        }
+        break
+
+      default:
+        logger.warn(
+          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+          `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: Unknown charging profile purpose: ${chargingProfile.chargingProfilePurpose}`
+        )
+        return false
+    }
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.validateChargingProfilePurpose: Purpose validation passed for profile ${chargingProfile.id.toString()}`
+    )
+    return true
+  }
+
+  /**
+   * Validates an individual charging schedule within a charging profile
+   * @param chargingStation - The charging station instance
+   * @param schedule - The charging schedule to validate
+   * @param scheduleIndex - Index of the schedule in the profile's schedule array
+   * @param chargingProfile - The parent charging profile
+   * @param evseId - EVSE identifier
+   * @returns `true` if schedule is valid, `false` otherwise
+   */
+  private validateChargingSchedule (
+    chargingStation: ChargingStation,
+    schedule: OCPP20ChargingScheduleType,
+    scheduleIndex: number,
+    chargingProfile: OCPP20ChargingProfileType,
+    evseId: number
+  ): boolean {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Validating schedule ${scheduleIndex.toString()} (ID: ${schedule.id.toString()}) in profile ${chargingProfile.id.toString()}`
+    )
+
+    if (schedule.id <= 0) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Invalid schedule ID ${schedule.id.toString()}, must be positive`
+      )
+      return false
+    }
+
+    if (!isNotEmptyArray(schedule.chargingSchedulePeriod)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Schedule must contain at least one charging schedule period`
+      )
+      return false
+    }
+
+    if (!Object.values(OCPP20ChargingRateUnitEnumType).includes(schedule.chargingRateUnit)) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Invalid charging rate unit: ${schedule.chargingRateUnit}`
+      )
+      return false
+    }
+
+    if (schedule.duration != null && schedule.duration <= 0) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Schedule duration must be positive if specified`
+      )
+      return false
+    }
+
+    if (schedule.minChargingRate != null && schedule.minChargingRate < 0) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Minimum charging rate cannot be negative`
+      )
+      return false
+    }
+
+    const startScheduleDate = convertToDate(schedule.startSchedule)
+    const validFromDate = convertToDate(chargingProfile.validFrom)
+    const validToDate = convertToDate(chargingProfile.validTo)
+
+    if (startScheduleDate != null && validFromDate != null && startScheduleDate < validFromDate) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Schedule start time cannot be before profile validFrom`
+      )
+      return false
+    }
+
+    if (startScheduleDate != null && validToDate != null && startScheduleDate >= validToDate) {
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Schedule start time must be before profile validTo`
+      )
+      return false
+    }
+
+    let previousStartPeriod = -1
+    for (const [periodIndex, period] of schedule.chargingSchedulePeriod.entries()) {
+      if (period.startPeriod < 0) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Period ${periodIndex.toString()} start time cannot be negative`
+        )
+        return false
+      }
+
+      if (period.startPeriod <= previousStartPeriod) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Period ${periodIndex.toString()} start time must be greater than previous period`
+        )
+        return false
+      }
+      previousStartPeriod = period.startPeriod
+
+      if (period.limit <= 0) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Period ${periodIndex.toString()} charging limit must be positive`
+        )
+        return false
+      }
+
+      if (schedule.minChargingRate != null && period.limit < schedule.minChargingRate) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Period ${periodIndex.toString()} limit cannot be below minimum charging rate`
+        )
+        return false
+      }
+
+      if (period.numberPhases != null) {
+        if (period.numberPhases < 1 || period.numberPhases > 3) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Period ${periodIndex.toString()} number of phases must be 1-3`
+          )
+          return false
+        }
+
+        if (
+          period.phaseToUse != null &&
+          (period.phaseToUse < 1 || period.phaseToUse > period.numberPhases)
+        ) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Period ${periodIndex.toString()} phaseToUse must be between 1 and numberPhases`
+          )
+          return false
+        }
+      }
+    }
+
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.validateChargingSchedule: Schedule ${scheduleIndex.toString()} validation passed`
+    )
+    return true
+  }
+
+  private validateTriggerMessageEvse (
+    chargingStation: ChargingStation,
+    evse: OCPP20TriggerMessageRequest['evse']
+  ): OCPP20TriggerMessageResponse | undefined {
+    if (evse?.id == null || evse.id <= 0) {
+      return undefined
+    }
+    if (!chargingStation.hasEvses) {
+      return {
+        status: TriggerMessageStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: 'Charging station does not support EVSEs',
+          reasonCode: ReasonCodeEnumType.UnsupportedRequest,
+        },
+      }
+    }
+    if (!chargingStation.hasEvse(evse.id)) {
+      return {
+        status: TriggerMessageStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `EVSE ${evse.id.toString()} does not exist`,
+          reasonCode: ReasonCodeEnumType.UnknownEvse,
+        },
+      }
+    }
+    if (
+      evse.connectorId != null &&
+      !chargingStation.getEvseStatus(evse.id)?.connectors.has(evse.connectorId)
+    ) {
+      return {
+        status: TriggerMessageStatusEnumType.Rejected,
+        statusInfo: {
+          additionalInfo: `Connector ${evse.connectorId.toString()} on EVSE ${evse.id.toString()} does not exist`,
+          reasonCode: ReasonCodeEnumType.UnknownConnectorId,
+        },
+      }
+    }
+    return undefined
+  }
+}
+
+/**
+ * OCPP 2.0.1 Incoming Request Service - handles and processes all incoming requests
+ * from the Central System (CSMS) to the Charging Station using OCPP 2.0.1 protocol.
+ *
+ * This service class is responsible for:
+ * - **Request Reception**: Receiving and routing OCPP 2.0.1 incoming requests from CSMS
+ * - **Payload Validation**: Validating incoming request payloads against OCPP 2.0.1 JSON schemas
+ * - **Request Processing**: Executing business logic for each OCPP 2.0.1 request type
+ * - **Response Generation**: Creating and sending appropriate responses back to CSMS
+ * - **Enhanced Features**: Supporting advanced OCPP 2.0.1 features like variable management
+ *
+ * Supported OCPP 2.0.1 Incoming Request Types:
+ * - **Transaction Management**: RequestStartTransaction, RequestStopTransaction
+ * - **Configuration Management**: SetVariables, GetVariables, GetBaseReport
+ * - **Security Operations**: CertificatesSigned, SecurityEventNotification
+ * - **Charging Management**: SetChargingProfile, ClearChargingProfile, GetChargingProfiles
+ * - **Diagnostics**: TriggerMessage, GetLog, UpdateFirmware
+ * - **Display Management**: SetDisplayMessage, ClearDisplayMessage
+ * - **Customer Management**: ClearCache, SendLocalList
+ *
+ * Key OCPP 2.0.1 Enhancements:
+ * - **Variable Model**: Advanced configuration through standardized variable system
+ * - **Enhanced Security**: Improved authentication and authorization mechanisms
+ * - **Rich Messaging**: Support for display messages and customer information
+ * - **Advanced Monitoring**: Comprehensive logging and diagnostic capabilities
+ * - **Flexible Charging**: Enhanced charging profile management and scheduling
+ *
+ * Architecture Pattern:
+ * This class extends OCPPIncomingRequestService and implements OCPP 2.0.1-specific
+ * request handling logic. It integrates with the OCPP20VariableManager for advanced
+ * configuration management and maintains backward compatibility concepts while
+ * providing next-generation OCPP features.
+ *
+ * Validation Workflow:
+ * 1. Incoming request received and parsed
+ * 2. Payload validated against OCPP 2.0.1 JSON schema
+ * 3. Request routed to appropriate handler method
+ * 4. Business logic executed with variable model integration
+ * 5. Response payload validated and sent back to CSMS
+ * @see {@link validateIncomingRequestPayload} Request payload validation method
+ * @see {@link handleRequestStartTransaction} Example OCPP 2.0.1 request handler
+ * @see {@link OCPP20VariableManager} Variable management integration
+ */

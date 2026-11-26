@@ -1,0 +1,4799 @@
+// Partial Copyright Jerome Benoit. 2021-2025. All Rights Reserved.
+
+import { millisecondsToSeconds, secondsToMilliseconds } from 'date-fns'
+import { hash, randomInt } from 'node:crypto'
+import { EventEmitter } from 'node:events'
+import { existsSync, type FSWatcher, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { URL } from 'node:url'
+import { parentPort } from 'node:worker_threads'
+import { type RawData, WebSocket } from 'ws'
+
+import type { CoherentSession } from './meter-values/index.js'
+
+import { BaseError, OCPPError } from '../exception/index.js'
+import { PerformanceStatistics } from '../performance/index.js'
+import { getStationConfigurationDir } from '../resolveAssetsDir.js'
+import {
+  type AutomaticTransactionGeneratorConfiguration,
+  AvailabilityType,
+  type BootNotificationRequest,
+  type BootNotificationResponse,
+  type CachedRequest,
+  type ChargingStationConfiguration,
+  ChargingStationEvents,
+  type ChargingStationInfo,
+  type ChargingStationOcppConfiguration,
+  type ChargingStationOptions,
+  type ChargingStationTemplate,
+  ConfigurationStatus,
+  type ConnectorEntry,
+  type ConnectorStatus,
+  ConnectorStatusEnum,
+  CurrentType,
+  type ErrorCallback,
+  type ErrorResponse,
+  ErrorType,
+  type EvseEntry,
+  type EvseStatus,
+  type EvseStatusConfiguration,
+  FileType,
+  FirmwareStatus,
+  type FirmwareStatusNotificationRequest,
+  type FirmwareStatusNotificationResponse,
+  type HeartbeatRequest,
+  type HeartbeatResponse,
+  type IncomingRequest,
+  IncomingRequestCommand,
+  type JsonType,
+  MapStringifyFormat,
+  MessageType,
+  MeterValueMeasurand,
+  OCPP20ComponentName,
+  OCPP20ReadingContextEnumType,
+  OCPP20RequiredVariableName,
+  type OCPP20TransactionEventRequest,
+  type OCPPCommandName,
+  OCPPVersion,
+  type OutgoingRequest,
+  PowerUnits,
+  PublicKeyWithSignedMeterValueEnumType,
+  RegistrationStatusEnumType,
+  RequestCommand,
+  type Reservation,
+  type ReservationKey,
+  ReservationTerminationReason,
+  type Response,
+  StandardParametersKey,
+  type Status,
+  type StopTransactionReason,
+  SupervisionUrlDistribution,
+  SupportedFeatureProfiles,
+  VendorParametersKey,
+  Voltage,
+  WebSocketCloseEventStatusCode,
+  type WSError,
+  type WsOptions,
+} from '../types/index.js'
+import {
+  ACElectricUtils,
+  AsyncLock,
+  AsyncLockType,
+  atomicWriteFileSync,
+  buildAddedMessage,
+  buildChargingStationAutomaticTransactionGeneratorConfiguration,
+  buildConnectorsStatus,
+  buildDeletedMessage,
+  buildEvsesStatus,
+  buildStartedMessage,
+  buildStoppedMessage,
+  buildUpdatedMessage,
+  clampToSafeTimerValue,
+  clone,
+  computeExponentialBackOffDelay,
+  Configuration,
+  Constants,
+  convertToBoolean,
+  convertToDate,
+  convertToInt,
+  DCElectricUtils,
+  ensureError,
+  formatDurationMilliSeconds,
+  formatDurationSeconds,
+  getEnumStringValue,
+  getErrorMessage,
+  getMessageTypeString,
+  getWebSocketCloseEventStatusString,
+  handleFileException,
+  interruptibleSleep,
+  isEmpty,
+  isNotEmptyArray,
+  isNotEmptyString,
+  isOCPP20x,
+  JSONStringify,
+  logger,
+  logPrefix,
+  mergeDeepRight,
+  min,
+  promiseWithTimeout,
+  secureRandom,
+  sleep,
+  SupervisionUrlSchema,
+  watchJsonFile,
+} from '../utils/index.js'
+import { AutomaticTransactionGenerator } from './AutomaticTransactionGenerator.js'
+import { ChargingStationWorkerBroadcastChannel } from './broadcast-channel/index.js'
+import { CoherentMeterValuesManager } from './CoherentMeterValuesManager.js'
+import {
+  addConfigurationKey,
+  buildConfigKey,
+  deleteConfigurationKey,
+  getConfigurationKey,
+  isSupervisionOcppKeyActive,
+  setConfigurationKeyValue,
+  warnOnOCPP16TemplateKeys,
+} from './ConfigurationKeyUtils.js'
+import {
+  buildConnectorsMap,
+  buildTemplateName,
+  checkChargingStationState,
+  checkConfiguration,
+  checkStationInfoConnectorStatus,
+  createSerialNumber,
+  getAmperageLimitationUnitDivider,
+  getBootConnectorStatus,
+  getChargingStationChargingProfilesLimit,
+  getChargingStationId,
+  getConfiguredMaxNumberOfConnectors,
+  getConnectorChargingProfilesLimit,
+  getDefaultConnectorMaximumPower,
+  getDefaultVoltageOut,
+  getHashId,
+  getIdTagsFile,
+  getMaxNumberOfConnectors,
+  getMaxNumberOfEvses,
+  getPhaseRotationValue,
+  hasFeatureProfile,
+  hasReservationExpired,
+  initializeConnectorsMapStatus,
+  prepareConnectorStatus,
+  preparePersistedTransactionEventQueue,
+  propagateSerialNumber,
+  setChargingStationOptions,
+  stationTemplateToStationInfo,
+  validateStationInfo,
+} from './Helpers.js'
+import { IdTagsCache } from './IdTagsCache.js'
+import {
+  buildBootNotificationRequest,
+  createOCPPServices,
+  flushQueuedTransactionMessages,
+  OCPP20ServiceUtils,
+  OCPPAuthServiceFactory,
+  OCPPConstants,
+  type OCPPIncomingRequestService,
+  type OCPPRequestService,
+  sendAndSetConnectorStatus,
+  stopRunningTransactions,
+} from './ocpp/index.js'
+import { SharedLRUCache } from './SharedLRUCache.js'
+import { CURRENT_SCHEMA_VERSION } from './TemplateMigrations.js'
+import { validateTemplate } from './TemplateValidation.js'
+import { resetTransactionEventQueueRuntimeState } from './TransactionEventQueueUtils.js'
+
+const moduleName = 'ChargingStation'
+const MAX_BUFFERED_RESPONSE_CALLBACK_BYTES = 1024 * 1024
+const MAX_BUFFERED_RESPONSE_CALLBACK_COUNT = 1024
+const TRANSACTION_EVENT_QUEUE_CHECKPOINT_INTERVAL_MS = 60_000
+
+interface BufferedMessageCallbackReservation {
+  readonly bytes: number
+  readonly onCancelled?: () => void
+}
+
+interface BufferedMessageCallbacks {
+  readonly onDiscarded?: () => void
+  readonly onSent?: () => void
+  readonly retainedBytes?: number
+}
+
+interface BufferedMessageEntry {
+  callbacks?: BufferedMessageCallbacks
+  reservation?: BufferedMessageCallbackReservation
+}
+
+interface ConfigurationSaveRequest {
+  readonly configurationHash: string
+  readonly lifecycleSignal: AbortSignal
+  readonly onErrorCallbacks: ((error: Error) => void)[]
+}
+
+interface TransactionEventQueueSaveOutcome {
+  readonly error?: Error
+}
+
+interface TransactionEventQueueSaveWaiter {
+  readonly lifecycleSignal: AbortSignal
+  readonly reject: (error: Error) => void
+  readonly resolve: (value: undefined) => void
+}
+
+class TransactionEventQueuePersistenceDiscardedError extends BaseError {}
+
+class TransactionEventQueuePersistenceSupersededError extends BaseError {}
+
+export class ChargingStation extends EventEmitter {
+  private static readonly normalWebSocketCloseEventStatusCodes: ReadonlySet<number> =
+    new Set<number>([
+      WebSocketCloseEventStatusCode.CLOSE_NO_STATUS,
+      WebSocketCloseEventStatusCode.CLOSE_NORMAL,
+    ])
+
+  public automaticTransactionGenerator?: AutomaticTransactionGenerator
+  public bootNotificationRequest?: BootNotificationRequest
+  public bootNotificationResponse?: BootNotificationResponse
+  public heartbeatSetInterval?: NodeJS.Timeout
+  public idTagsCache: IdTagsCache
+  public readonly index: number
+  public ocppConfiguration?: ChargingStationOcppConfiguration
+  public ocppRequestService!: OCPPRequestService
+  public performanceStatistics?: PerformanceStatistics
+  public powerDivider?: number
+  public readonly requests: Map<string, CachedRequest>
+  public started: boolean
+  public starting: boolean
+  public stationInfo?: ChargingStationInfo
+  public readonly templateFile: string
+  public wsConnection: null | WebSocket
+
+  public get hasEvses (): boolean {
+    return isEmpty(this.connectors) && !isEmpty(this.evses)
+  }
+
+  public get lifecycleAbortSignal (): AbortSignal {
+    this.lifecycleAbortController ??= new AbortController()
+    return this.lifecycleAbortController.signal
+  }
+
+  public get wsConnectionUrl (): URL {
+    const supervisionUrlOcppKey = isSupervisionOcppKeyActive(this)
+      ? this.stationInfo.supervisionUrlOcppKey
+      : undefined
+    const configuredSupervisionUrl =
+      supervisionUrlOcppKey != null
+        ? getConfigurationKey(this, supervisionUrlOcppKey)?.value
+        : undefined
+    const wsConnectionBaseUrlStr = isNotEmptyString(configuredSupervisionUrl)
+      ? configuredSupervisionUrl
+      : this.configuredSupervisionUrl.href
+    // Only the OCPP configuration key is labelled as such when it actually
+    // supplied the value; an absent or empty key falls back to the configured
+    // supervision URL, so the diagnostic must not name the OCPP key.
+    const supervisionUrlField =
+      supervisionUrlOcppKey != null && isNotEmptyString(configuredSupervisionUrl)
+        ? supervisionUrlOcppKey
+        : 'supervisionUrls'
+    // OCPP-J 1.6 §3.1.1: percent-encode the identity as one path segment;
+    // preserve its raw value elsewhere.
+    // Trim the base before appending the identity to keep trailing spaces
+    // (including NBSP/EM SPACE) out of the request path.
+    const wsConnectionBaseUrl = wsConnectionBaseUrlStr.trim()
+    return this.parseSupervisionUrl(
+      `${wsConnectionBaseUrl}${
+        !wsConnectionBaseUrl.endsWith('/') ? '/' : ''
+      }${encodeURIComponent(String(this.stationInfo?.chargingStationId))}`,
+      supervisionUrlField,
+      wsConnectionBaseUrlStr
+    )
+  }
+
+  private acceptedMessageSequenceStartup?: Promise<void>
+  private readonly acknowledgedBufferedMessages = new Set<string>()
+  private alignedMeterValuesGeneration = 0
+  private alignedMeterValuesRestartPending = false
+  private alignedMeterValuesSetTimeout?: NodeJS.Timeout
+  private alignedMeterValuesStartup?: Promise<void>
+  private automaticTransactionGeneratorConfiguration?: AutomaticTransactionGeneratorConfiguration
+  private bufferedMessageCallbackBytes = 0
+  private bufferedMessageCallbackCount = 0
+  private readonly bufferedMessageCallbackReservations =
+    new Set<BufferedMessageCallbackReservation>()
+
+  private readonly bufferedMessageEntries: BufferedMessageEntry[] = []
+
+  private bufferedMessageInFlight?: {
+    entry: BufferedMessageEntry
+    isRequest: boolean
+    message: string
+    messageId?: string
+    retracted: boolean
+    stopDrain?: boolean
+    waitingForCallGate: boolean
+  }
+
+  private readonly chargingStationWorkerBroadcastChannel: ChargingStationWorkerBroadcastChannel
+  private configurationFile: string
+  private configurationFileHash: string
+  private configuredSupervisionUrl!: URL
+  private readonly connectors: Map<number, ConnectorStatus>
+  private connectorsConfigurationHash: string
+  private readonly creationOptions?: ChargingStationOptions
+  // Tripped by delete() to cancel a pending reset(). Kept distinct from
+  // started/stopping (which reset() itself toggles through stop()) so a station
+  // deleted during the reset window is not resurrected and reconnected.
+  private readonly deleteAbortController: AbortController
+  private deleteConfigurationRequested = false
+  private deletePromise?: Promise<void>
+  private readonly evses: Map<number, EvseStatus>
+  private evsesConfigurationHash: string
+  private flushingMessageBuffer: boolean
+  private flushMessageBufferSetInterval?: NodeJS.Timeout
+  private lifecycleAbortController?: AbortController
+  private readonly messageQueue: string[]
+  private ocppIncomingRequestService!: OCPPIncomingRequestService
+  private pendingConfigurationSave: Promise<void> = Promise.resolve()
+  private pendingConfigurationSaveRequest?: ConfigurationSaveRequest
+  private persistenceDiscarded = false
+  private readonly sharedLRUCache: SharedLRUCache
+  private startAfterStopPromise?: Promise<void>
+  private stopping: boolean
+  private stopPromise?: Promise<void>
+  private templateFileHash: string
+  private templateFileWatcher?: FSWatcher
+  private transactionEventQueueCommittedVersion = 0
+  private transactionEventQueueMutationVersion = 0
+  private transactionEventQueueSaveDelayResolve?: () => void
+  private transactionEventQueueSaveDirty = false
+  private transactionEventQueueSaveImmediate = false
+  private transactionEventQueueSaveOwner?: object
+  private transactionEventQueueSavePromise?: Promise<TransactionEventQueueSaveOutcome>
+  private transactionEventQueueSaveSetTimeout?: NodeJS.Timeout
+  private readonly transactionEventQueueSaveWaiters = new Map<
+    number,
+    Set<TransactionEventQueueSaveWaiter>
+  >()
+
+  private wsConnectionRetryCount: number
+  private readonly wsConnectionsClosedByRequest: WeakSet<WebSocket>
+  private wsPingSetInterval?: NodeJS.Timeout
+  /**
+   * Creation options to re-apply when re-initializing on a reset or template
+   * reload. Only a non-persistent station needs them: a persistent one restores
+   * its identity and configuration from its saved file, which stays the source
+   * of truth, so re-applying the creation options would needlessly override it.
+   * @returns The retained creation options when the station is non-persistent,
+   *   `undefined` otherwise.
+   */
+  private get reinitializationOptions (): ChargingStationOptions | undefined {
+    return this.stationInfo?.stationInfoPersistentConfiguration === false
+      ? this.creationOptions
+      : undefined
+  }
+
+  constructor (index: number, templateFile: string, options?: ChargingStationOptions) {
+    super()
+    this.started = false
+    this.starting = false
+    this.stopping = false
+    this.deleteAbortController = new AbortController()
+    this.lifecycleAbortController = new AbortController()
+    this.wsConnection = null
+    this.wsConnectionsClosedByRequest = new WeakSet<WebSocket>()
+    this.wsConnectionRetryCount = 0
+    this.index = index
+    this.templateFile = templateFile
+    this.connectors = new Map<number, ConnectorStatus>()
+    this.evses = new Map<number, EvseStatus>()
+    this.requests = new Map<string, CachedRequest>()
+    this.flushingMessageBuffer = false
+    this.messageQueue = [] as string[]
+    this.sharedLRUCache = SharedLRUCache.getInstance()
+    this.idTagsCache = IdTagsCache.getInstance()
+    this.chargingStationWorkerBroadcastChannel = new ChargingStationWorkerBroadcastChannel(this)
+    this.configurationFile = ''
+    this.configurationFileHash = ''
+    this.connectorsConfigurationHash = ''
+    this.evsesConfigurationHash = ''
+    this.templateFileHash = ''
+    // Kept so a reset or template reload can re-apply the configured identity
+    // and supervision URL. Cloned so the in-place update in setSupervisionUrl
+    // stays off the shared worker data.
+    this.creationOptions = clone(options)
+
+    this.on(ChargingStationEvents.added, () => {
+      parentPort?.postMessage(buildAddedMessage(this))
+    })
+    this.on(ChargingStationEvents.deleted, () => {
+      parentPort?.postMessage(buildDeletedMessage(this))
+    })
+    this.on(ChargingStationEvents.started, () => {
+      parentPort?.postMessage(buildStartedMessage(this))
+    })
+    this.on(ChargingStationEvents.stopped, () => {
+      parentPort?.postMessage(buildStoppedMessage(this))
+    })
+    this.on(ChargingStationEvents.updated, () => {
+      parentPort?.postMessage(buildUpdatedMessage(this))
+    })
+    this.on(ChargingStationEvents.connectorStatusChanged, () => {
+      parentPort?.postMessage(buildUpdatedMessage(this))
+    })
+    this.on(ChargingStationEvents.accepted, () => {
+      this.startAcceptedMessageSequence(
+        this.wsConnectionRetryCount > 0
+          ? true
+          : this.getAutomaticTransactionGeneratorConfiguration()?.stopAbsoluteDuration
+      ).catch((error: unknown) => {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.onAccepted: Error while starting accepted-state services:`,
+          error
+        )
+      })
+      this.wsConnectionRetryCount = 0
+    })
+    this.on(ChargingStationEvents.rejected, () => {
+      this.acceptedMessageSequenceStartup = undefined
+      this.wsConnectionRetryCount = 0
+    })
+    this.on(ChargingStationEvents.connected, () => {
+      if (this.wsPingSetInterval == null) {
+        this.startWebSocketPing()
+      }
+    })
+    this.on(ChargingStationEvents.disconnected, () => {
+      this.acceptedMessageSequenceStartup = undefined
+      try {
+        this.internalStopMessageSequence()
+      } catch (error) {
+        const e = ensureError(error)
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.onDisconnected: Error while stopping the internal message sequence:`,
+          e
+        )
+      }
+    })
+
+    this.initialize(options)
+
+    this.add()
+
+    if (this.stationInfo?.autoStart === true) {
+      this.start()
+    }
+  }
+
+  /**
+   * Injects a pre-built coherent session directly into the session store.
+   * **Test seam only** — delegates to
+   * {@link CoherentMeterValuesManager.injectSession}, which enforces the
+   * `NODE_ENV === 'production'` guard.
+   * @param transactionId - Transaction identifier.
+   * @param session - Pre-built session.
+   * @throws {BaseError} When invoked in a production build.
+   */
+  public __injectCoherentSession (transactionId: number | string, session: CoherentSession): void {
+    CoherentMeterValuesManager.getInstance(this)?.injectSession(transactionId, session)
+  }
+
+  /**
+   * Adds a reservation to the specified connector.
+   * @param reservation - The reservation to add
+   * @param isOperationCurrent - Optional operation-ownership guard for post-await mutation.
+   */
+  public async addReservation (
+    reservation: Reservation,
+    isOperationCurrent?: () => boolean
+  ): Promise<void> {
+    const reservationFound = this.getReservationBy('reservationId', reservation.reservationId)
+    if (reservationFound != null) {
+      await this.removeReservation(
+        reservationFound,
+        ReservationTerminationReason.REPLACE_EXISTING,
+        isOperationCurrent
+      )
+    }
+    if (isOperationCurrent?.() === false) return
+    const connectorStatus = this.getConnectorStatus(reservation.connectorId)
+    if (connectorStatus == null) {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.addReservation: No connector ${reservation.connectorId.toString()} found during reservation ${reservation.reservationId.toString()} addition`
+      )
+      return
+    }
+    connectorStatus.reservation = reservation
+    await sendAndSetConnectorStatus(
+      this,
+      {
+        connectorId: reservation.connectorId,
+        status: ConnectorStatusEnum.Reserved,
+      },
+      { isOperationCurrent, send: reservation.connectorId !== 0 }
+    )
+  }
+
+  /* eslint-disable perfectionist/sort-classes */
+  /**
+   * Reserves bounded memory for response-delivery callbacks before transport starts.
+   * @param retainedBytes - Serialized frame and callback-owned payload bytes.
+   * @param onCancelled - Releases a response whose transport callback never settles.
+   * @returns The reservation, or `undefined` when the callback budget is exhausted.
+   */
+  public reserveBufferedMessageCallbacks (
+    retainedBytes: number,
+    onCancelled?: () => void
+  ): BufferedMessageCallbackReservation | undefined {
+    if (!Number.isFinite(this.bufferedMessageCallbackCount)) {
+      this.bufferedMessageCallbackCount = 0
+    }
+    if (!Number.isFinite(this.bufferedMessageCallbackBytes)) {
+      this.bufferedMessageCallbackBytes = 0
+    }
+    const bytes = Math.max(0, Number.isFinite(retainedBytes) ? retainedBytes : 0)
+    if (
+      this.bufferedMessageCallbackCount >= MAX_BUFFERED_RESPONSE_CALLBACK_COUNT ||
+      this.bufferedMessageCallbackBytes + bytes > MAX_BUFFERED_RESPONSE_CALLBACK_BYTES
+    ) {
+      return undefined
+    }
+    const reservation = { bytes, onCancelled }
+    this.bufferedMessageCallbackReservations.add(reservation)
+    ++this.bufferedMessageCallbackCount
+    this.bufferedMessageCallbackBytes += bytes
+    return reservation
+  }
+
+  /**
+   * Releases a response callback reservation exactly once.
+   * @param reservation - Reservation to release, if still owned.
+   */
+  public releaseBufferedMessageCallbacks (
+    reservation: BufferedMessageCallbackReservation | undefined
+  ): void {
+    if (reservation == null || !this.bufferedMessageCallbackReservations.delete(reservation)) return
+    --this.bufferedMessageCallbackCount
+    this.bufferedMessageCallbackBytes -= reservation.bytes
+  }
+
+  /**
+   * Cancels every response callback reservation owned by this station lifecycle.
+   * Buffered responses are detached before callbacks run so cancellation cannot
+   * replay stale delivery side effects after a restart.
+   */
+  public releaseAllBufferedMessageCallbacks (): void {
+    const discardedCallbacks: BufferedMessageCallbacks[] = []
+    for (
+      let messageIndex = this.bufferedMessageEntries.length - 1;
+      messageIndex >= 0;
+      messageIndex--
+    ) {
+      if (this.bufferedMessageEntries[messageIndex]?.callbacks == null) continue
+      const callbacks = ChargingStation.prototype.removeBufferedMessageEntry.call(
+        this,
+        messageIndex,
+        false
+      )
+      if (callbacks != null) discardedCallbacks.unshift(callbacks)
+    }
+    const reservations = [...this.bufferedMessageCallbackReservations]
+    this.bufferedMessageCallbackReservations.clear()
+    this.bufferedMessageCallbackCount = 0
+    this.bufferedMessageCallbackBytes = 0
+    for (const callbacks of discardedCallbacks) {
+      try {
+        callbacks.onDiscarded?.()
+      } catch (error: unknown) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.releaseAllBufferedMessageCallbacks: Buffered message discard callback failed:`,
+          error
+        )
+      }
+    }
+    for (const reservation of reservations) reservation.onCancelled?.()
+  }
+
+  /**
+   * Buffers an OCPP message for deferred sending when connection is unavailable.
+   * @param message - The OCPP message to buffer.
+   * @param prepend - Whether to restore the message ahead of queued successors.
+   * @param callbacks - Optional callbacks retained with this exact buffered frame.
+   * @param callbackReservation - Existing in-flight reservation transferred to this buffer entry.
+   * @returns Whether the frame was accepted into the buffer.
+   */
+  public bufferMessage (
+    message: string,
+    prepend = false,
+    callbacks?: BufferedMessageCallbacks,
+    callbackReservation?: BufferedMessageCallbackReservation
+  ): boolean {
+    if (this.bufferedMessageEntries.length < this.messageQueue.length) {
+      this.bufferedMessageEntries.push(
+        ...Array.from(
+          { length: this.messageQueue.length - this.bufferedMessageEntries.length },
+          (): BufferedMessageEntry => ({})
+        )
+      )
+    } else if (this.bufferedMessageEntries.length > this.messageQueue.length) {
+      this.bufferedMessageEntries.splice(this.messageQueue.length)
+    }
+    const serializedBytes = Buffer.byteLength(message, 'utf8')
+    const callbackBytes =
+      callbacks == null
+        ? 0
+        : Math.max(
+          serializedBytes,
+          Number.isFinite(callbacks.retainedBytes) ? (callbacks.retainedBytes ?? 0) : 0
+        )
+    const reservation =
+      callbacks == null
+        ? undefined
+        : (callbackReservation ?? this.reserveBufferedMessageCallbacks(callbackBytes))
+    if (
+      callbacks != null &&
+      (reservation == null || !this.bufferedMessageCallbackReservations.has(reservation))
+    ) {
+      try {
+        callbacks.onDiscarded?.()
+      } catch (error: unknown) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.bufferMessage: Rejected buffered response discard callback failed:`,
+          error
+        )
+      }
+      return false
+    }
+    const entry: BufferedMessageEntry = { callbacks, reservation }
+    if (prepend) {
+      this.messageQueue.unshift(message)
+      this.bufferedMessageEntries.unshift(entry)
+    } else {
+      this.messageQueue.push(message)
+      this.bufferedMessageEntries.push(entry)
+    }
+    const inFlight = this.bufferedMessageInFlight
+    if (inFlight?.isRequest === true && inFlight.waitingForCallGate && inFlight.messageId != null) {
+      try {
+        const [messageType] = JSON.parse(message) as ErrorResponse | OutgoingRequest | Response
+        if (messageType !== MessageType.CALL_MESSAGE) {
+          const cancelled = this.ocppRequestService.cancelOutgoingCallWaiter(
+            this,
+            inFlight.messageId,
+            new OCPPError(
+              ErrorType.GENERIC_ERROR,
+              `Buffered response preempted replay of CALL message id '${inFlight.messageId}'`
+            )
+          )
+          if (!cancelled) {
+            // The gate can hand ownership to this replay immediately before this
+            // callback runs. Retract that now-active CALL so the response is not
+            // stranded behind it.
+            inFlight.retracted = true
+            this.ocppRequestService.releaseOutgoingCall(this, inFlight.messageId)
+          }
+        }
+      } catch {
+        // Malformed frames are discarded by the normal buffered replay path.
+      }
+    }
+    this.setIntervalFlushMessageBuffer()
+    return true
+  }
+
+  /**
+   * Applies a configuration change requested by a trusted local caller (e.g. the Web UI),
+   * reusing the OCPP-version-specific spec logic (readonly rejection, value validation,
+   * side-effect restarts, reboot signalling) without emitting an OCPP response to the CSMS.
+   * @param key - Configuration key name.
+   * @param value - New value to apply.
+   * @returns The resulting {@link ConfigurationStatus}.
+   */
+  public changeConfiguration (key: string, value: string): ConfigurationStatus {
+    const status = this.ocppIncomingRequestService.changeConfiguration(this, key, value)
+    if (status === ConfigurationStatus.ACCEPTED || status === ConfigurationStatus.REBOOT_REQUIRED) {
+      this.emitChargingStationEvent(ChargingStationEvents.updated)
+    }
+    return status
+  }
+
+  /** Clears buffered OCPP messages that must no longer be replayed. */
+  public clearMessageBuffer (): void {
+    if (this.bufferedMessageInFlight != null) this.bufferedMessageInFlight.retracted = true
+    this.acknowledgedBufferedMessages.clear()
+    this.messageQueue.length = 0
+    for (const { callbacks, reservation } of this.bufferedMessageEntries) {
+      this.releaseBufferedMessageCallbacks(reservation)
+      try {
+        callbacks?.onDiscarded?.()
+      } catch (error: unknown) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.clearMessageBuffer: Buffered message discard callback failed:`,
+          error
+        )
+      }
+    }
+    this.bufferedMessageEntries.length = 0
+    this.releaseAllBufferedMessageCallbacks()
+    this.clearIntervalFlushMessageBuffer()
+  }
+
+  /**
+   * Closes the WebSocket connection to the central server.
+   * @param options - Close options
+   * @param options.byRequest - Whether the close is terminal (for example, a UI
+   *   disconnect or station stop); terminal closes do not reconnect, while other
+   *   closes (for example, certificate rotation) reconnect like a server-initiated drop
+   */
+  /* eslint-enable perfectionist/sort-classes */
+  public closeWSConnection ({ byRequest = false }: { byRequest?: boolean } = {}): void {
+    const wsConnection = this.wsConnection
+    if (wsConnection?.readyState === WebSocket.OPEN) {
+      if (byRequest) {
+        this.wsConnectionsClosedByRequest.add(wsConnection)
+      }
+      wsConnection.close()
+    }
+  }
+
+  /**
+   * Creates or returns the coherent MeterValues session for a transaction.
+   * Idempotent. Delegates to
+   * {@link CoherentMeterValuesManager.createSession}; returns `undefined`
+   * when coherent mode is disabled or no valid EV profile file is loaded.
+   *
+   * Uses `peekInstance` (lookup-only): opt-in stations warm up the
+   * manager at initialize, so subsequent calls find it in the cache;
+   * non-opt-in stations never allocate a manager because
+   * `manager.createSession` would return `undefined` anyway.
+   * @param transactionId - Transaction identifier from the CSMS.
+   * @param connectorId - Connector on which the transaction is running.
+   * @param evseId - EVSE containing the connector when connector ids are EVSE-local.
+   * @returns The active or newly-created session, or `undefined` when
+   *   coherent mode is not usable.
+   */
+  public createCoherentSession (
+    transactionId: number | string,
+    connectorId: number,
+    evseId?: number
+  ): CoherentSession | undefined {
+    return CoherentMeterValuesManager.peekInstance(this)?.createSession(
+      transactionId,
+      connectorId,
+      evseId
+    )
+  }
+
+  /**
+   * Deletes the charging station instance and optionally its persisted configuration.
+   * @param deleteConfiguration - Whether to delete the persisted configuration file
+   * @returns Promise that resolves after the shared delete operation completes
+   */
+  public delete (deleteConfiguration = true): Promise<void> {
+    if (deleteConfiguration) this.deleteConfigurationRequested = true
+    // Cancel any pending reset() synchronously so a station deleted during its
+    // reset window cannot be re-initialized before deletion begins.
+    this.deleteAbortController.abort()
+    // Deletion is single-flight: concurrent callers join the same bounded stop
+    // and cleanup instead of cancelling lifecycle requests started by the first.
+    this.deletePromise ??= Promise.resolve().then(() =>
+      ChargingStation.prototype.performDelete.call(this)
+    )
+    if (!deleteConfiguration) return this.deletePromise
+    return this.deletePromise.finally(() => {
+      ChargingStation.prototype.discardPersistence.call(this)
+      ChargingStation.prototype.performDeleteConfiguration.call(this)
+    })
+  }
+
+  /**
+   * Removes the coherent session for a transaction. Idempotent — safe to
+   * call from every reset/stop/disconnect path. Delegates to
+   * {@link CoherentMeterValuesManager.destroySession}, which disposes the
+   * module-scope per-session runtime state (voltage-noise PRNG closure).
+   * Uses `peekInstance` so non-opt-in stations never allocate a manager
+   * on a transaction-end tear-down.
+   * @param transactionId - Transaction identifier.
+   * @returns `true` when a session was removed, `false` otherwise.
+   */
+  public destroyCoherentSession (transactionId: number | string | undefined): boolean {
+    return CoherentMeterValuesManager.peekInstance(this)?.destroySession(transactionId) ?? false
+  }
+
+  /**
+   * Emit a ChargingStation event only if there are listeners registered for it.
+   * This optimizes performance by avoiding unnecessary event emission.
+   * @param event - The ChargingStation event to emit
+   * @param args - Arguments to pass to the event listeners
+   */
+  public emitChargingStationEvent (event: ChargingStationEvents, ...args: unknown[]): void {
+    if (this.listenerCount(event) > 0) {
+      this.emit(event, ...args)
+    }
+  }
+
+  public getAuthorizeRemoteTxRequests (): boolean {
+    const authorizeRemoteTxRequests = getConfigurationKey(
+      this,
+      StandardParametersKey.AuthorizeRemoteTxRequests
+    )
+    return authorizeRemoteTxRequests != null
+      ? convertToBoolean(authorizeRemoteTxRequests.value)
+      : false
+  }
+
+  /**
+   * Gets the automatic transaction generator configuration.
+   * @returns The ATG configuration or undefined if not available
+   */
+  public getAutomaticTransactionGeneratorConfiguration ():
+    AutomaticTransactionGeneratorConfiguration | undefined {
+    if (this.automaticTransactionGeneratorConfiguration == null) {
+      let automaticTransactionGeneratorConfiguration:
+        AutomaticTransactionGeneratorConfiguration | undefined
+      const stationTemplate = this.getTemplateFromFile()
+      const stationConfiguration = this.getConfigurationFromFile()
+      if (
+        this.stationInfo?.automaticTransactionGeneratorPersistentConfiguration === true &&
+        stationConfiguration?.stationInfo?.templateHash === stationTemplate?.templateHash &&
+        stationConfiguration?.automaticTransactionGenerator != null
+      ) {
+        automaticTransactionGeneratorConfiguration =
+          stationConfiguration.automaticTransactionGenerator
+      } else {
+        automaticTransactionGeneratorConfiguration = stationTemplate?.AutomaticTransactionGenerator
+      }
+      this.automaticTransactionGeneratorConfiguration = {
+        ...Constants.DEFAULT_ATG_CONFIGURATION,
+        ...automaticTransactionGeneratorConfiguration,
+      }
+    }
+    return this.automaticTransactionGeneratorConfiguration
+  }
+
+  /**
+   * Gets the status of each ATG connector.
+   * @returns Array of ATG connector statuses or undefined
+   */
+  public getAutomaticTransactionGeneratorStatuses (): Status[] | undefined {
+    return this.getConfigurationFromFile()?.automaticTransactionGeneratorStatuses
+  }
+
+  /**
+   * Restores acknowledged-but-unanswered replayed CALLs to their original FIFO prefix,
+   * then returns the ids of all buffered CALL frames. Malformed frames are ignored here
+   * and handled by the normal flush path.
+   * @returns Buffered OCPP CALL message ids.
+   */
+  public getBufferedRequestIds (): Set<string> {
+    this.restoreAcknowledgedBufferedMessages()
+    const messageIds = new Set<string>()
+    for (const message of [...this.messageQueue, ...this.acknowledgedBufferedMessages.values()]) {
+      try {
+        const parsedMessage = JSON.parse(message) as ErrorResponse | OutgoingRequest | Response
+        if (parsedMessage[0] === MessageType.CALL_MESSAGE) messageIds.add(parsedMessage[1])
+      } catch {
+        // Ignore malformed frames: they cannot identify a pending CALL.
+      }
+    }
+    return messageIds
+  }
+
+  /**
+   * Retrieves the coherent session for a transaction, if any. Delegates
+   * to {@link CoherentMeterValuesManager.getSession}. Uses `peekInstance`
+   * because this method is reached from the unconditional strategy gate
+   * in `OCPPServiceUtils.buildMeterValue` on every MeterValue tick — a
+   * `getInstance` here would allocate a manager for every station that
+   * ever emits a MeterValue, opt-in or not.
+   * @param transactionId - Transaction identifier.
+   * @returns The session or `undefined` when none exists.
+   */
+  public getCoherentSession (transactionId: number | string): CoherentSession | undefined {
+    return CoherentMeterValuesManager.peekInstance(this)?.getSession(transactionId)
+  }
+
+  public getConnectionTimeout (): number {
+    if (getConfigurationKey(this, StandardParametersKey.ConnectionTimeOut) != null) {
+      return convertToInt(
+        getConfigurationKey(this, StandardParametersKey.ConnectionTimeOut)?.value ??
+          Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS
+      )
+    }
+    return Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS
+  }
+
+  /**
+   * Resolves the first connector ID for a given EVSE ID.
+   * @param evseId - The EVSE ID
+   * @returns The connector ID or undefined if not found
+   */
+  public getConnectorIdByEvseId (evseId: number): number | undefined {
+    return this.iterateConnectors().find(({ evseId: id }) => id === evseId)?.connectorId
+  }
+
+  /**
+   * Resolves the connector ID for a given transaction ID.
+   * @param transactionId - The transaction ID to resolve
+   * @returns The connector ID or undefined if not found
+   */
+  public getConnectorIdByTransactionId (
+    transactionId: number | string | undefined
+  ): number | undefined {
+    if (transactionId == null) {
+      return undefined
+    }
+    return this.iterateConnectors().find(
+      ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+    )?.connectorId
+  }
+
+  /**
+   * Computes the maximum power available on a connector considering amperage limitations and charging profiles.
+   * @param connectorId - The connector ID
+   * @param evseId - Optional EVSE id when connector ids are EVSE-local
+   * @returns The maximum available power in watts
+   */
+  public getConnectorMaximumAvailablePower (connectorId: number, evseId?: number): number {
+    let connectorAmperageLimitationLimit: number | undefined
+    const connectorStatus = this.getConnectorStatus(connectorId, evseId)
+    const amperageLimitation = this.getAmperageLimitation()
+    if (
+      amperageLimitation != null &&
+      amperageLimitation < (this.stationInfo?.maximumAmperage ?? Infinity)
+    ) {
+      const voltageOut = this.getVoltageOut()
+      connectorAmperageLimitationLimit =
+        (this.getCurrentOutType() === CurrentType.AC
+          ? ACElectricUtils.powerTotal(
+            this.getNumberOfPhases(),
+            voltageOut,
+            amperageLimitation *
+                (this.hasEvses ? this.getNumberOfEvses() : this.getNumberOfConnectors())
+          )
+          : DCElectricUtils.power(voltageOut, amperageLimitation)) / (this.powerDivider ?? 1)
+    }
+    const maximumPower = this.stationInfo?.maximumPower
+    if (maximumPower == null || maximumPower <= 0) {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.getConnectorMaximumAvailablePower: maximumPower is ${
+          maximumPower?.toString() ?? 'undefined'
+        }, cannot compute connector maximum power`
+      )
+      return Number.POSITIVE_INFINITY
+    }
+    // On DC, the template maximumPower is the AC input-side power; the
+    // power actually available for charging is input * conversion efficiency.
+    // AC => 1 (not applied). Absent => 1 (backward compatible). Applied to both
+    // power-derived bounds: the connector hardware bound is an input-side power
+    // rating too (its default derives from the AC template power; an explicit
+    // Connectors[n].maximumPower is configured directly), so it must be reduced
+    // as well and cannot short-circuit the factor through min().
+    const conversionEfficiency =
+      this.getCurrentOutType() === CurrentType.DC
+        ? (this.stationInfo?.conversionEfficiency ?? 1)
+        : 1
+    const connectorMaximumPower = (maximumPower / (this.powerDivider ?? 1)) * conversionEfficiency
+    const connectorHardwareMaximumPowerInput = connectorStatus?.maximumPower
+    const connectorHardwareMaximumPower =
+      connectorHardwareMaximumPowerInput == null
+        ? undefined
+        : connectorHardwareMaximumPowerInput * conversionEfficiency
+    const chargingStationChargingProfilesLimit =
+      (getChargingStationChargingProfilesLimit(this) ?? Number.POSITIVE_INFINITY) /
+      (this.powerDivider ?? 1)
+    const connectorChargingProfilesLimit = getConnectorChargingProfilesLimit(
+      this,
+      connectorId,
+      connectorStatus
+    )
+    return min(
+      Number.isNaN(connectorMaximumPower) ? Number.POSITIVE_INFINITY : connectorMaximumPower,
+      connectorHardwareMaximumPower == null || Number.isNaN(connectorHardwareMaximumPower)
+        ? Number.POSITIVE_INFINITY
+        : connectorHardwareMaximumPower,
+      connectorAmperageLimitationLimit == null || Number.isNaN(connectorAmperageLimitationLimit)
+        ? Number.POSITIVE_INFINITY
+        : connectorAmperageLimitationLimit,
+      Number.isNaN(chargingStationChargingProfilesLimit)
+        ? Number.POSITIVE_INFINITY
+        : chargingStationChargingProfilesLimit,
+      connectorChargingProfilesLimit == null || Number.isNaN(connectorChargingProfilesLimit)
+        ? Number.POSITIVE_INFINITY
+        : connectorChargingProfilesLimit
+    )
+  }
+
+  public getConnectorStatus (connectorId: number, evseId?: number): ConnectorStatus | undefined {
+    if (evseId != null) {
+      return this.getEvseStatus(evseId)?.connectors.get(connectorId)
+    }
+    return this.iterateConnectors().find(({ connectorId: id }) => id === connectorId)
+      ?.connectorStatus
+  }
+
+  /**
+   * Gets cumulative active energy imported on a connector.
+   * @param connectorId - The connector ID
+   * @param rounded - Whether to round the value
+   * @returns The cumulative active energy imported in watt-hours
+   * @param evseId - Optional EVSE id when connector ids are EVSE-local
+   */
+  public getEnergyActiveImportRegisterByConnectorId (
+    connectorId: number,
+    rounded = false,
+    evseId?: number
+  ): number {
+    return this.getEnergyActiveImportRegister(this.getConnectorStatus(connectorId, evseId), rounded)
+  }
+
+  /**
+   * Gets cumulative active energy imported for a transaction.
+   * @param transactionId - The transaction ID
+   * @param rounded - Whether to round the value
+   * @returns The cumulative active energy imported in watt-hours
+   */
+  public getEnergyActiveImportRegisterByTransactionId (
+    transactionId: number | string | undefined,
+    rounded = false
+  ): number {
+    return this.getEnergyActiveImportRegister(
+      transactionId != null
+        ? this.iterateConnectors().find(
+          ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+        )?.connectorStatus
+        : undefined,
+      rounded
+    )
+  }
+
+  /**
+   * Resolves the EVSE ID for a given connector ID.
+   * @param connectorId - The connector ID
+   * @returns The EVSE ID or undefined if not found
+   */
+  public getEvseIdByConnectorId (connectorId: number): number | undefined {
+    return this.iterateConnectors().find(({ connectorId: id }) => id === connectorId)?.evseId
+  }
+
+  /**
+   * Resolves the EVSE ID for a given transaction ID.
+   * @param transactionId - The transaction ID
+   * @returns The EVSE ID or undefined if not found
+   */
+  public getEvseIdByTransactionId (transactionId: number | string | undefined): number | undefined {
+    if (transactionId == null) {
+      return undefined
+    }
+    return this.iterateConnectors().find(
+      ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+    )?.evseId
+  }
+
+  /**
+   * Returns the EVSE status for the given EVSE ID.
+   * @param evseId - The EVSE ID to look up
+   * @returns The EvseStatus if found, undefined otherwise
+   */
+  public getEvseStatus (evseId: number): EvseStatus | undefined {
+    return this.evses.get(evseId)
+  }
+
+  public getHeartbeatInterval (): number {
+    const HeartbeatInterval = getConfigurationKey(this, StandardParametersKey.HeartbeatInterval)
+    if (HeartbeatInterval != null) {
+      return secondsToMilliseconds(convertToInt(HeartbeatInterval.value))
+    }
+    const HeartBeatInterval = getConfigurationKey(this, StandardParametersKey.HeartBeatInterval)
+    if (HeartBeatInterval != null) {
+      return secondsToMilliseconds(convertToInt(HeartBeatInterval.value))
+    }
+    this.stationInfo?.autoRegister === false &&
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.getHeartbeatInterval: Heartbeat interval configuration key not set, using default value: ${Constants.DEFAULT_HEARTBEAT_INTERVAL_MS.toString()}`
+      )
+    return Constants.DEFAULT_HEARTBEAT_INTERVAL_MS
+  }
+
+  public getLocalAuthListEnabled (): boolean {
+    const localAuthListEnabled = getConfigurationKey(
+      this,
+      StandardParametersKey.LocalAuthListEnabled
+    )
+    return localAuthListEnabled != null ? convertToBoolean(localAuthListEnabled.value) : false
+  }
+
+  public getNumberOfConnectors (): number {
+    return this.iterateConnectors(true).reduce(count => count + 1, 0)
+  }
+
+  public getNumberOfEvses (): number {
+    return this.evses.has(0) ? this.evses.size - 1 : this.evses.size
+  }
+
+  /**
+   * Gets the number of electrical phases for this station.
+   * @param stationInfo - Optional station info to use instead of this.stationInfo
+   * @returns The number of phases (3 for AC, 0 for DC)
+   */
+  public getNumberOfPhases (stationInfo?: ChargingStationInfo): number {
+    const localStationInfo = stationInfo ?? this.stationInfo
+    switch (this.getCurrentOutType(stationInfo)) {
+      case CurrentType.AC:
+        return localStationInfo?.numberOfPhases ?? 3
+      case CurrentType.DC:
+        return 0
+    }
+  }
+
+  /**
+   * Counts currently active transactions across all connectors.
+   * @returns The number of running transactions
+   */
+  public getNumberOfRunningTransactions (): number {
+    return this.iterateConnectors(true).reduce(
+      (count, { connectorStatus }) =>
+        connectorStatus.transactionStarted === true ? count + 1 : count,
+      0
+    )
+  }
+
+  /**
+   * Finds a reservation matching the given filter predicate.
+   * @param filterKey - The reservation property to filter by
+   * @param value - The value to match
+   * @returns The matching reservation or undefined
+   */
+  public getReservationBy (
+    filterKey: ReservationKey,
+    value: number | string
+  ): Reservation | undefined {
+    return this.iterateConnectors().find(
+      ({ connectorStatus }) => connectorStatus.reservation?.[filterKey] === value
+    )?.connectorStatus.reservation
+  }
+
+  public getReserveConnectorZeroSupported (): boolean {
+    return convertToBoolean(
+      getConfigurationKey(this, StandardParametersKey.ReserveConnectorZeroSupported)?.value
+    )
+  }
+
+  /**
+   * Gets the ID tag used for a given transaction.
+   * @param transactionId - The transaction ID
+   * @returns The ID tag or undefined if not found
+   */
+  public getTransactionIdTag (transactionId: number): string | undefined {
+    return this.iterateConnectors().find(
+      ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+    )?.connectorStatus.transactionIdTag
+  }
+
+  public getVoltageOut (stationInfo?: ChargingStationInfo): Voltage {
+    return (
+      (stationInfo ?? this.stationInfo)?.voltageOut ??
+      getDefaultVoltageOut(this.getCurrentOutType(stationInfo), this.logPrefix(), this.templateFile)
+    )
+  }
+
+  public getWebSocketPingInterval (): number {
+    return getConfigurationKey(this, StandardParametersKey.WebSocketPingInterval) != null
+      ? convertToInt(getConfigurationKey(this, StandardParametersKey.WebSocketPingInterval)?.value)
+      : Constants.DEFAULT_WS_PING_INTERVAL_SECONDS
+  }
+
+  /**
+   * Returns whether a buffered CALL frame is awaiting a response under this message id.
+   * @param messageId - OCPP unique message identifier
+   * @returns Whether the request is queued for replay
+   */
+  public hasBufferedRequest (messageId: string): boolean {
+    return this.getBufferedRequestIds().has(messageId)
+  }
+
+  public hasConnector (connectorId: number): boolean {
+    return this.iterateConnectors().some(({ connectorId: id }) => id === connectorId)
+  }
+
+  public hasEvse (evseId: number): boolean {
+    return this.evses.has(evseId)
+  }
+
+  public hasIdTags (): boolean {
+    const idTagsFile = this.stationInfo != null ? getIdTagsFile(this.stationInfo) : undefined
+    return idTagsFile != null && isNotEmptyArray(this.idTagsCache.getIdTags(idTagsFile))
+  }
+
+  public inAcceptedState (): boolean {
+    return this.bootNotificationResponse?.status === RegistrationStatusEnumType.ACCEPTED
+  }
+
+  public inPendingState (): boolean {
+    return this.bootNotificationResponse?.status === RegistrationStatusEnumType.PENDING
+  }
+
+  public inRejectedState (): boolean {
+    return this.bootNotificationResponse?.status === RegistrationStatusEnumType.REJECTED
+  }
+
+  public inUnknownState (): boolean {
+    return this.bootNotificationResponse?.status == null
+  }
+
+  public isChargingStationAvailable (): boolean {
+    return this.getConnectorStatus(0)?.availability === AvailabilityType.Operative
+  }
+
+  public isConnectorAvailable (connectorId: number): boolean {
+    return (
+      connectorId > 0 &&
+      this.getConnectorStatus(connectorId)?.availability === AvailabilityType.Operative
+    )
+  }
+
+  /**
+   * Checks whether a connector can accept a new reservation.
+   * @param reservationId - The reservation ID to check
+   * @param idTag - Optional ID tag for user reservation check
+   * @param connectorId - Optional connector ID to check availability
+   * @returns `true` if the connector can accept a reservation
+   */
+  public isConnectorReservable (
+    reservationId: number,
+    idTag?: string,
+    connectorId?: number
+  ): boolean {
+    const reservation = this.getReservationBy('reservationId', reservationId)
+    const reservationExists = reservation != null && !hasReservationExpired(reservation)
+    if (arguments.length === 1) {
+      return !reservationExists
+    } else if (arguments.length > 1) {
+      const userReservation = idTag != null ? this.getReservationBy('idTag', idTag) : undefined
+      const userReservationExists =
+        userReservation != null && !hasReservationExpired(userReservation)
+      const notConnectorZero = connectorId == null ? true : connectorId > 0
+      const freeConnectorsAvailable = this.getNumberOfReservableConnectors() > 0
+      return (
+        !reservationExists && !userReservationExists && notConnectorZero && freeConnectorsAvailable
+      )
+    }
+    return false
+  }
+
+  public isStopping (): boolean {
+    return this.stopping
+  }
+
+  public isWebSocketConnectionOpened (): boolean {
+    return this.wsConnection?.readyState === WebSocket.OPEN
+  }
+
+  public * iterateConnectors (skipZero = false): Generator<ConnectorEntry> {
+    if (this.hasEvses) {
+      for (const [evseId, evseStatus] of this.evses) {
+        if (skipZero && evseId === 0) continue
+        for (const [connectorId, connectorStatus] of evseStatus.connectors) {
+          if (skipZero && connectorId === 0) continue
+          yield { connectorId, connectorStatus, evseId }
+        }
+      }
+    } else {
+      for (const [connectorId, connectorStatus] of this.connectors) {
+        if (skipZero && connectorId === 0) continue
+        yield { connectorId, connectorStatus, evseId: undefined }
+      }
+    }
+  }
+
+  public * iterateEvses (skipZero = false): Generator<EvseEntry> {
+    for (const [evseId, evseStatus] of this.evses) {
+      if (skipZero && evseId === 0) continue
+      yield { evseId, evseStatus }
+    }
+  }
+
+  public lockConnector (connectorId: number): void {
+    if (connectorId === 0) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.lockConnector: connector id 0 is not a physical connector`
+      )
+      return
+    }
+    if (!this.hasConnector(connectorId)) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.lockConnector: connector id ${connectorId.toString()} does not exist`
+      )
+      return
+    }
+    const connectorStatus = this.getConnectorStatus(connectorId)
+    if (connectorStatus == null) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.lockConnector: connector id ${connectorId.toString()} status is null`
+      )
+      return
+    }
+    if (connectorStatus.locked !== true) {
+      connectorStatus.locked = true
+      this.emitChargingStationEvent(ChargingStationEvents.connectorStatusChanged, {
+        connectorId,
+        ...connectorStatus,
+      })
+    }
+  }
+
+  public logPrefix = (): string => {
+    if (
+      this instanceof ChargingStation &&
+      this.stationInfo != null &&
+      isNotEmptyString(this.stationInfo.chargingStationId)
+    ) {
+      return logPrefix(` ${this.stationInfo.chargingStationId} |`)
+    }
+    let stationTemplate: ChargingStationTemplate | undefined
+    try {
+      stationTemplate = JSON.parse(
+        readFileSync(this.templateFile, 'utf8')
+      ) as ChargingStationTemplate
+    } catch {
+      // Ignore
+    }
+    return logPrefix(` ${getChargingStationId(this.index, stationTemplate)} |`)
+  }
+
+  /**
+   * Opens the WebSocket connection to the OCPP central server.
+   * @param options - Optional WebSocket connection options
+   * @param params - Optional connection parameters
+   * @param params.closeOpened - Whether to close an existing connection
+   * @param params.terminateOpened - Whether to terminate an existing connection
+   */
+  public openWSConnection (
+    options?: WsOptions,
+    params?: { closeOpened?: boolean; terminateOpened?: boolean }
+  ): void {
+    options = {
+      handshakeTimeout: secondsToMilliseconds(Constants.DEFAULT_WS_HANDSHAKE_TIMEOUT_SECONDS),
+      ...this.stationInfo?.wsOptions,
+      ...options,
+    }
+    params = { ...{ closeOpened: false, terminateOpened: false }, ...params }
+    if (!checkChargingStationState(this, this.logPrefix())) {
+      return
+    }
+    if (this.stationInfo?.supervisionUser != null && this.stationInfo.supervisionPassword != null) {
+      if (this.stationInfo.supervisionUser.includes(':')) {
+        logger.warn(
+          `${this.logPrefix()} ${moduleName}.openWSConnection: Supervision user contains ':' which is invalid in HTTP Basic Auth (RFC 7617) — skipping auth`
+        )
+      } else {
+        options.auth = `${this.stationInfo.supervisionUser}:${this.stationInfo.supervisionPassword}`
+      }
+    }
+    if (params.closeOpened) {
+      this.closeWSConnection()
+    }
+    if (params.terminateOpened) {
+      this.terminateWSConnection()
+    }
+    if (this.wsConnection != null && !this.isWebSocketConnectionOpened()) {
+      this.restoreAcknowledgedBufferedMessages()
+    }
+
+    if (this.isWebSocketConnectionOpened()) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.openWSConnection: OCPP connection to URL ${this.wsConnectionUrl.href} is already opened`
+      )
+      return
+    }
+
+    logger.info(
+      `${this.logPrefix()} ${moduleName}.openWSConnection: Open OCPP connection to URL ${this.wsConnectionUrl.href}`
+    )
+
+    const wsConnection = new WebSocket(
+      this.wsConnectionUrl,
+      // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+      `ocpp${this.stationInfo?.ocppVersion}`,
+      options
+    )
+    this.wsConnection = wsConnection
+
+    wsConnection.on('message', data => {
+      this.onMessage(data, wsConnection).catch((error: unknown) =>
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.openWSConnection: Error while processing WebSocket message:`,
+          error
+        )
+      )
+    })
+    wsConnection.on('error', error => {
+      this.onError(wsConnection, error)
+    })
+    wsConnection.on('close', (code, reason) => {
+      this.onClose(wsConnection, code, reason)
+    })
+    wsConnection.on('open', () => {
+      this.onOpen().catch((error: unknown) =>
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.openWSConnection: Error while opening WebSocket connection:`,
+          error
+        )
+      )
+    })
+    wsConnection.on('ping', this.onPing.bind(this))
+    wsConnection.on('pong', this.onPong.bind(this))
+  }
+
+  /** Forces and awaits durable persistence of the current transaction event queue snapshot. */
+  public async persistTransactionEventQueues (): Promise<void> {
+    if (this.persistenceDiscarded) {
+      throw new TransactionEventQueuePersistenceDiscardedError(
+        'TransactionEvent queue persistence was discarded by station deletion'
+      )
+    }
+    this.saveTransactionEventQueues()
+    const persistenceState = this as unknown as {
+      transactionEventQueueCommittedVersion?: number
+      transactionEventQueueMutationVersion?: number
+      transactionEventQueueSaveWaiters?: Map<number, Set<TransactionEventQueueSaveWaiter>>
+    }
+    const targetVersion = persistenceState.transactionEventQueueMutationVersion ?? 0
+    if ((persistenceState.transactionEventQueueCommittedVersion ?? 0) >= targetVersion) return
+    const waitersByVersion =
+      persistenceState.transactionEventQueueSaveWaiters ??
+      new Map<number, Set<TransactionEventQueueSaveWaiter>>()
+    persistenceState.transactionEventQueueSaveWaiters = waitersByVersion
+    const { promise, reject, resolve } = Promise.withResolvers<undefined>()
+    const waiter = { lifecycleSignal: this.lifecycleAbortSignal, reject, resolve }
+    let waiters = waitersByVersion.get(targetVersion)
+    if (waiters == null) {
+      waiters = new Set()
+      waitersByVersion.set(targetVersion, waiters)
+    }
+    waiters.add(waiter)
+    if ((persistenceState.transactionEventQueueCommittedVersion ?? 0) >= targetVersion) {
+      waiters.delete(waiter)
+      if (isEmpty(waiters)) waitersByVersion.delete(targetVersion)
+      resolve(undefined)
+    }
+    await promise
+  }
+
+  /**
+   * Records a request statistic for the given command, but only when statistics
+   * collection is enabled on the station (`stationInfo.enableStatistics`).
+   * @param command - OCPP command the statistic is recorded against.
+   * @param messageType - Message type of the recorded exchange.
+   */
+  public recordRequestStatistic (command: OCPPCommandName, messageType: MessageType): void {
+    if (this.stationInfo?.enableStatistics === true) {
+      this.performanceStatistics?.addRequestStatistic(command, messageType)
+    }
+  }
+
+  /**
+   * Retracts one exact serialized OCPP frame from deferred replay.
+   * If that frame is currently being flushed, its eventual send callback is
+   * prevented from removing the next queued frame.
+   * @param message - Exact serialized OCPP frame to retract
+   * @returns Whether a matching queued frame was removed
+   */
+  public removeBufferedMessage (message: string): boolean {
+    const messageIndex = this.messageQueue.indexOf(message)
+    if (messageIndex === -1) return this.acknowledgedBufferedMessages.delete(message)
+    ChargingStation.prototype.removeBufferedMessageEntry.call(this, messageIndex, true)
+    return true
+  }
+
+  /**
+   * Retracts the currently owned buffered CALL for an OCPP message id.
+   * Payload replacement keeps the message id stable, so terminal request cleanup
+   * must not depend on the serialized frame captured before replacement.
+   * @param messageId - OCPP unique message identifier
+   * @returns Whether a matching queued or acknowledged request was removed
+   */
+  public removeBufferedRequest (messageId: string): boolean {
+    const messageIndex = this.messageQueue.findIndex(message => {
+      try {
+        const parsedMessage = JSON.parse(message) as ErrorResponse | OutgoingRequest | Response
+        return parsedMessage[0] === MessageType.CALL_MESSAGE && parsedMessage[1] === messageId
+      } catch {
+        return false
+      }
+    })
+    if (messageIndex >= 0) {
+      ChargingStation.prototype.removeBufferedMessageEntry.call(this, messageIndex, true)
+      return true
+    }
+    for (const message of this.acknowledgedBufferedMessages) {
+      try {
+        const parsedMessage = JSON.parse(message) as ErrorResponse | OutgoingRequest | Response
+        if (parsedMessage[0] === MessageType.CALL_MESSAGE && parsedMessage[1] === messageId) {
+          return this.acknowledgedBufferedMessages.delete(message)
+        }
+      } catch {
+        // Malformed frames cannot match a request id and are handled by the flush path.
+      }
+    }
+    return false
+  }
+
+  /**
+   * Removes a reservation and restores the connector to its previous status.
+   * @param reservation - The reservation to remove
+   * @param reason - The reason for removing the reservation
+   * @param isOperationCurrent - Optional operation-ownership guard for post-await mutation.
+   */
+  public async removeReservation (
+    reservation: Reservation,
+    reason: ReservationTerminationReason,
+    isOperationCurrent?: () => boolean
+  ): Promise<void> {
+    if (isOperationCurrent?.() === false) return
+    const connectorStatus = this.getConnectorStatus(reservation.connectorId)
+    if (connectorStatus == null) {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.removeReservation: Trying to remove reservation on non-existent connector id ${reservation.connectorId.toString()}`
+      )
+      return
+    }
+    switch (reason) {
+      case ReservationTerminationReason.CONNECTOR_STATE_CHANGED:
+      case ReservationTerminationReason.TRANSACTION_STARTED:
+        delete connectorStatus.reservation
+        break
+      case ReservationTerminationReason.EXPIRED:
+      case ReservationTerminationReason.REPLACE_EXISTING:
+      case ReservationTerminationReason.RESERVATION_CANCELED:
+        await sendAndSetConnectorStatus(
+          this,
+          {
+            connectorId: reservation.connectorId,
+            status: ConnectorStatusEnum.Available,
+          },
+          { isOperationCurrent, send: reservation.connectorId !== 0 }
+        )
+        if (isOperationCurrent?.() === false) return
+        delete connectorStatus.reservation
+        break
+      default:
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        throw new BaseError(`Unknown reservation termination reason '${reason}'`)
+    }
+  }
+
+  /**
+   * Replaces the payload of an exact buffered CALL before replay reaches it.
+   * @param commandName - Command of the buffered request.
+   * @param previousPayload - Payload object used to identify the cached request.
+   * @param replacementPayload - Reconciled payload to persist and replay.
+   * @returns Whether the buffered request was replaced.
+   */
+  public replaceBufferedRequestPayload (
+    commandName: RequestCommand,
+    previousPayload: JsonType,
+    replacementPayload: JsonType
+  ): boolean {
+    for (const [messageId, cachedRequest] of this.requests) {
+      if (cachedRequest[2] !== commandName || cachedRequest[3] !== previousPayload) continue
+      const messageIndex = this.messageQueue.findIndex(message => {
+        try {
+          const [, bufferedMessageId] = JSON.parse(message) as OutgoingRequest
+          return bufferedMessageId === messageId
+        } catch {
+          return false
+        }
+      })
+      if (messageIndex < 0) return false
+      const previousMessage = this.messageQueue[messageIndex]
+      const selectedReplay =
+        this.bufferedMessageInFlight?.message === previousMessage
+          ? this.bufferedMessageInFlight
+          : undefined
+      if (selectedReplay != null && !selectedReplay.waitingForCallGate) return false
+      const replacementMessage = JSON.stringify([
+        MessageType.CALL_MESSAGE,
+        messageId,
+        commandName,
+        replacementPayload,
+      ] satisfies OutgoingRequest)
+      this.messageQueue[messageIndex] = replacementMessage
+      if (selectedReplay != null) selectedReplay.message = replacementMessage
+      cachedRequest[3] = replacementPayload
+      this.saveConfiguration()
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Resets the charging station with optional graceful shutdown.
+   * @param reason - Optional reason for the reset
+   * @param graceful - Whether to perform a graceful shutdown
+   */
+  public async reset (reason?: StopTransactionReason, graceful = true): Promise<void> {
+    try {
+      await this.stop(reason, graceful ? this.stationInfo?.stopTransactionsOnStopped : false)
+    } catch (error) {
+      const e = ensureError(error)
+      logger.error(`${this.logPrefix()} ${moduleName}.reset: Error during reset stop phase:`, e)
+      return
+    }
+    await interruptibleSleep(this.stationInfo?.resetTime ?? 0, this.deleteAbortController.signal)
+    // A delete() during the reset window aborts the sleep above; bail out before
+    // re-initializing so a deleted station is not re-initialized or reconnected.
+    if (this.deleteAbortController.signal.aborted) {
+      return
+    }
+    OCPPAuthServiceFactory.clearInstance(this)
+    this.initialize(this.reinitializationOptions)
+    this.start()
+  }
+
+  /**
+   * Restarts the autonomous clock-aligned MeterValues timer.
+   * @param previousInterval - Previous interval in milliseconds, used to settle elapsed energy.
+   * @param settleDisabledInterval - Settle the current interval while disabling aligned sampling.
+   */
+  public restartAlignedMeterValues (
+    previousInterval?: number,
+    settleDisabledInterval = false
+  ): void {
+    const disabledIntervalSeconds = settleDisabledInterval
+      ? OCPP20ServiceUtils.readAlignedDataIntervalSeconds(this)
+      : undefined
+    const settlementInterval =
+      previousInterval ??
+      (disabledIntervalSeconds != null ? secondsToMilliseconds(disabledIntervalSeconds) : undefined)
+    if (
+      this.started &&
+      !this.stopping &&
+      settlementInterval != null &&
+      settlementInterval > 0 &&
+      (settleDisabledInterval ||
+        OCPP20ServiceUtils.readVariableAsBoolean(
+          this,
+          OCPP20ComponentName.AlignedDataCtrlr,
+          OCPP20RequiredVariableName.Enabled,
+          false
+        ))
+    ) {
+      const timestamp = new Date()
+      const energyNominalInterval = OCPP20ServiceUtils.getTransactionEnergyNominalInterval(
+        this,
+        settlementInterval
+      )
+      for (const { connectorId, connectorStatus, evseId } of this.iterateConnectors(true)) {
+        if (
+          connectorStatus.transactionStarted !== true ||
+          connectorStatus.transactionId == null ||
+          connectorStatus.transactionEnding === true ||
+          connectorStatus.transactionRestored === true
+        ) {
+          continue
+        }
+        try {
+          OCPP20ServiceUtils.buildTransactionMeterValue(
+            this,
+            connectorId,
+            evseId,
+            connectorStatus.transactionId,
+            settlementInterval,
+            buildConfigKey(
+              OCPP20ComponentName.AlignedDataCtrlr,
+              OCPP20RequiredVariableName.Measurands
+            ),
+            OCPP20ReadingContextEnumType.SAMPLE_CLOCK,
+            timestamp,
+            energyNominalInterval,
+            true
+          )
+        } catch (error: unknown) {
+          logger.warn(
+            `${this.logPrefix()} ${moduleName}.restartAlignedMeterValues: Failed to settle connector ${connectorId.toString()}: ${getErrorMessage(error)}`
+          )
+        }
+      }
+    }
+    this.stopAlignedMeterValues()
+    if (!this.started || this.stopping) {
+      this.alignedMeterValuesRestartPending = false
+      return
+    }
+    if (this.alignedMeterValuesStartup != null) {
+      this.alignedMeterValuesRestartPending = true
+      return
+    }
+    this.alignedMeterValuesRestartPending = false
+    this.startAlignedMeterValues()
+  }
+
+  /** Restarts the periodic heartbeat to the central server. */
+  public restartHeartbeat (): void {
+    this.stopHeartbeat()
+    this.startHeartbeat()
+  }
+
+  /**
+   * Restarts active OCPP 2.0 transaction sampling timers after an interval change.
+   * @param kind - Timer family to restart.
+   * @param interval - New interval in milliseconds.
+   * @param previousInterval - Previous interval in milliseconds, used to settle elapsed energy.
+   */
+  public restartTransactionMeterValues (
+    kind: 'ended' | 'updated',
+    interval: number,
+    previousInterval?: number
+  ): void {
+    const timestamp = new Date()
+    const previousEnergyNominalInterval =
+      previousInterval != null && previousInterval > 0
+        ? OCPP20ServiceUtils.getTransactionEnergyNominalInterval(this, previousInterval, {
+          ...(kind === 'ended' && { txEndedInterval: previousInterval }),
+          ...(kind === 'updated' && { txUpdatedInterval: previousInterval }),
+        })
+        : undefined
+    for (const { connectorId, connectorStatus, evseId } of this.iterateConnectors(true)) {
+      if (
+        connectorStatus.transactionStarted !== true ||
+        connectorStatus.transactionId == null ||
+        connectorStatus.transactionEnding === true ||
+        connectorStatus.transactionRestored === true
+      ) {
+        continue
+      }
+      if (previousInterval != null && previousInterval > 0) {
+        try {
+          OCPP20ServiceUtils.buildTransactionMeterValue(
+            this,
+            connectorId,
+            evseId,
+            connectorStatus.transactionId,
+            previousInterval,
+            buildConfigKey(
+              OCPP20ComponentName.SampledDataCtrlr,
+              kind === 'updated'
+                ? OCPP20RequiredVariableName.TxUpdatedMeasurands
+                : OCPP20RequiredVariableName.TxEndedMeasurands
+            ),
+            kind === 'updated'
+              ? OCPP20ReadingContextEnumType.SAMPLE_PERIODIC
+              : OCPP20ReadingContextEnumType.TRANSACTION_END,
+            timestamp,
+            previousEnergyNominalInterval,
+            true
+          )
+        } catch (error: unknown) {
+          logger.warn(
+            `${this.logPrefix()} ${moduleName}.restartTransactionMeterValues: Failed to settle connector ${connectorId.toString()}: ${getErrorMessage(error)}`
+          )
+        }
+      }
+      if (kind === 'updated') {
+        OCPP20ServiceUtils.stopUpdatedMeterValues(this, connectorId, evseId)
+        OCPP20ServiceUtils.startUpdatedMeterValues(this, connectorId, interval, evseId)
+      } else {
+        OCPP20ServiceUtils.stopEndedMeterValues(this, connectorId, evseId)
+        OCPP20ServiceUtils.startEndedMeterValues(this, connectorId, interval, evseId)
+      }
+    }
+  }
+
+  /** Restarts the WebSocket ping interval. */
+  public restartWebSocketPing (): void {
+    this.stopWebSocketPing()
+    this.startWebSocketPing()
+  }
+
+  /**
+   * Keeps an exact deferred frame queued when its in-flight replay is cancelled.
+   * @param message - Exact serialized OCPP frame to retain
+   * @returns Whether a matching queued frame exists
+   */
+  public retainBufferedMessage (message: string): boolean {
+    const messageIndex = this.messageQueue.indexOf(message)
+    if (messageIndex !== -1) {
+      if (messageIndex === 0 && this.bufferedMessageInFlight?.message === message) {
+        this.bufferedMessageInFlight.retracted = true
+        this.bufferedMessageInFlight.stopDrain = true
+      }
+      return true
+    }
+    if (!this.acknowledgedBufferedMessages.has(message)) return false
+    this.restoreAcknowledgedBufferedMessages()
+    return true
+  }
+
+  /**
+   * Keeps a buffered CALL identified by its OCPP message id.
+   * @param messageId - OCPP unique message identifier
+   * @returns Whether a matching queued request exists
+   */
+  public retainBufferedRequest (messageId: string): boolean {
+    for (const message of [...this.messageQueue, ...this.acknowledgedBufferedMessages.values()]) {
+      try {
+        const parsedMessage = JSON.parse(message) as ErrorResponse | OutgoingRequest | Response
+        if (parsedMessage[0] === MessageType.CALL_MESSAGE && parsedMessage[1] === messageId) {
+          return this.retainBufferedMessage(message)
+        }
+      } catch {
+        // Malformed frames cannot match a request id and are handled by the flush path.
+      }
+    }
+    return false
+  }
+
+  /** Persists the current OCPP configuration to storage. */
+  public saveOcppConfiguration (): void {
+    if (this.stationInfo?.ocppPersistentConfiguration === true) {
+      this.saveConfiguration()
+    }
+  }
+
+  /**
+   * Coalesces queue snapshots to one in-flight save plus one latest-state save.
+   * @param deferred - Whether to pace this checkpoint behind the queue save interval
+   */
+  public saveTransactionEventQueues (deferred = false): void {
+    if (this.persistenceDiscarded) return
+    const persistenceState = this as unknown as {
+      transactionEventQueueMutationVersion?: number
+    }
+    persistenceState.transactionEventQueueMutationVersion =
+      (persistenceState.transactionEventQueueMutationVersion ?? 0) + 1
+    this.transactionEventQueueSaveDirty = true
+    ChargingStation.prototype.startTransactionEventQueueSave.call(this, deferred)
+  }
+
+  /**
+   * Updates the supervision server URL and optionally the CSMS basic auth credentials.
+   * @param url - The new supervision server URL
+   * @param supervisionUser - CSMS basic auth user (undefined preserves existing)
+   * @param supervisionPassword - CSMS basic auth password (undefined preserves existing)
+   */
+  public setSupervisionUrl (
+    url: string,
+    supervisionUser?: string,
+    supervisionPassword?: string
+  ): void {
+    const applyCredentials = (target: {
+      supervisionPassword?: string
+      supervisionUser?: string
+    }): void => {
+      if (supervisionUser != null) {
+        target.supervisionUser = supervisionUser
+      }
+      if (supervisionPassword != null) {
+        target.supervisionPassword = supervisionPassword
+      }
+    }
+    if (isSupervisionOcppKeyActive(this)) {
+      const supervisionUrl = this.parseSupervisionUrl(url, this.stationInfo.supervisionUrlOcppKey)
+      setConfigurationKeyValue(this, this.stationInfo.supervisionUrlOcppKey, supervisionUrl.href)
+    } else if (this.stationInfo != null) {
+      const prevSupervisionUrls = this.stationInfo.supervisionUrls
+      this.stationInfo.supervisionUrls = url
+      try {
+        this.configuredSupervisionUrl = this.getConfiguredSupervisionUrl()
+      } catch (error) {
+        this.stationInfo.supervisionUrls = prevSupervisionUrls
+        throw error
+      }
+    }
+    if (this.stationInfo != null) {
+      applyCredentials(this.stationInfo)
+      // Retain the caller's URL and credentials for non-persistent resets and
+      // template reloads, which rebuild OCPP configuration from these options.
+      // getConfiguredSupervisionUrl normalizes the URL again before reseeding the key.
+      if (this.creationOptions != null) {
+        this.creationOptions.supervisionUrls = url
+        applyCredentials(this.creationOptions)
+      }
+      this.saveStationInfo()
+      this.emitChargingStationEvent(ChargingStationEvents.updated)
+    }
+  }
+
+  /** Settles elapsed transaction energy before changing the active measurand family. */
+  public settleTransactionEnergyMeterValues (): void {
+    if (!this.started || this.stopping) return
+    const meteringConfiguration = OCPP20ServiceUtils.getTransactionEnergyMeteringConfiguration(this)
+    if (meteringConfiguration == null) return
+    const timestamp = new Date()
+    for (const { connectorId, connectorStatus, evseId } of this.iterateConnectors(true)) {
+      if (
+        connectorStatus.transactionStarted !== true ||
+        connectorStatus.transactionId == null ||
+        connectorStatus.transactionEnding === true ||
+        connectorStatus.transactionRestored === true
+      ) {
+        continue
+      }
+      try {
+        OCPP20ServiceUtils.buildTransactionMeterValue(
+          this,
+          connectorId,
+          evseId,
+          connectorStatus.transactionId,
+          meteringConfiguration.interval,
+          meteringConfiguration.measurandsKey,
+          meteringConfiguration.context,
+          timestamp,
+          meteringConfiguration.interval,
+          true
+        )
+      } catch (error: unknown) {
+        logger.warn(
+          `${this.logPrefix()} ${moduleName}.settleTransactionEnergyMeterValues: Failed to settle connector ${connectorId.toString()}: ${getErrorMessage(error)}`
+        )
+      }
+    }
+  }
+
+  /** Starts the charging station, initializes connectors, and connects to the central server. */
+  public start (): void {
+    if (this.deleteAbortController.signal.aborted || this.deletePromise != null) {
+      logger.warn(`${this.logPrefix()} ${moduleName}.start: Charging station deletion is terminal`)
+      return
+    }
+    if (this.stopPromise != null) {
+      if (this.startAfterStopPromise == null) {
+        const pendingStop = this.stopPromise
+        const startAfterStop = pendingStop
+          .then(() => {
+            if (!this.deleteAbortController.signal.aborted && this.deletePromise == null) {
+              this.start()
+            }
+            return undefined
+          })
+          .catch((error: unknown) => {
+            logger.error(
+              `${this.logPrefix()} ${moduleName}.start: Cannot start after stop failed:`,
+              error
+            )
+          })
+          .finally(() => {
+            if (this.startAfterStopPromise === startAfterStop) {
+              delete this.startAfterStopPromise
+            }
+          })
+        this.startAfterStopPromise = startAfterStop
+      }
+      return
+    }
+    if (this.stopping) {
+      logger.warn(`${this.logPrefix()} ${moduleName}.start: Charging station is stopping`)
+      return
+    }
+    if (!this.started) {
+      if (!this.starting) {
+        if (this.lifecycleAbortController?.signal.aborted !== false) {
+          this.lifecycleAbortController = new AbortController()
+        }
+        this.starting = true
+        try {
+          this.ocppIncomingRequestService.activate(this, this.lifecycleAbortSignal)
+          if (this.stationInfo?.enableStatistics === true) {
+            this.performanceStatistics?.start()
+          }
+          this.openWSConnection()
+          // Monitor charging station template file
+          this.templateFileWatcher = watchJsonFile(
+            this.templateFile,
+            FileType.ChargingStationTemplate,
+            this.logPrefix(),
+            (event, filename): void => {
+              if (isNotEmptyString(filename) && event === 'change') {
+                try {
+                  logger.debug(
+                    `${this.logPrefix()} ${moduleName}.start: ${FileType.ChargingStationTemplate} ${
+                      this.templateFile
+                    } file has changed, reloading`
+                  )
+                  this.sharedLRUCache.deleteChargingStationTemplate(this.templateFileHash)
+                  const idTagsFile =
+                    this.stationInfo != null ? getIdTagsFile(this.stationInfo) : undefined
+                  if (idTagsFile != null) {
+                    this.idTagsCache.deleteIdTags(idTagsFile)
+                  }
+                  OCPPAuthServiceFactory.clearInstance(this)
+                  this.initialize(this.reinitializationOptions)
+                  // Restart the ATG
+                  const ATGStarted = this.automaticTransactionGenerator?.started
+                  if (ATGStarted === true) {
+                    this.stopAutomaticTransactionGenerator()
+                  }
+                  delete this.automaticTransactionGeneratorConfiguration
+                  if (
+                    this.getAutomaticTransactionGeneratorConfiguration()?.enable === true &&
+                    ATGStarted === true
+                  ) {
+                    this.startAutomaticTransactionGenerator(undefined, true)
+                  }
+                  if (this.stationInfo?.enableStatistics === true) {
+                    this.performanceStatistics?.restart()
+                  } else {
+                    this.performanceStatistics?.stop()
+                  }
+                  this.restartHeartbeat()
+                  this.restartWebSocketPing()
+                  this.restartAlignedMeterValues()
+                } catch (error) {
+                  const e = ensureError(error)
+                  logger.error(
+                    `${this.logPrefix()} ${moduleName}.start: ${FileType.ChargingStationTemplate} file monitoring error:`,
+                    e
+                  )
+                }
+              }
+            }
+          )
+          this.started = true
+          this.emitChargingStationEvent(ChargingStationEvents.started)
+        } finally {
+          this.starting = false
+        }
+      } else {
+        logger.warn(`${this.logPrefix()} ${moduleName}.start: Already starting`)
+      }
+    } else {
+      logger.warn(`${this.logPrefix()} ${moduleName}.start: Already started`)
+    }
+  }
+
+  /**
+   * 2F). OCPP 2.0.x only; a no-op when `AlignedDataCtrlr.Enabled` is false or
+   * `AlignedDataCtrlr.Interval` resolves to 0 or falls outside the supported
+   * UTC-day range.
+   */
+  public startAlignedMeterValues (): void {
+    if (!isOCPP20x(this.stationInfo?.ocppVersion)) {
+      return
+    }
+    // Defensive: validateStationInfo rejects Connectors-only OCPP 2.0.1
+    // templates, so a station reaching this point without EVSE topology would
+    // make the sweep a silent no-op.
+    if (!this.hasEvses) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.startAlignedMeterValues: Station has no EVSE topology (Connectors-only template), not starting the clock-aligned MeterValues`
+      )
+      return
+    }
+    if (!OCPP20ServiceUtils.isAlignedDataEnabled(this)) {
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.startAlignedMeterValues: Clock-aligned MeterValues disabled by AlignedDataCtrlr.Enabled=false`
+      )
+      return
+    }
+    const intervalSeconds = OCPP20ServiceUtils.readAlignedDataIntervalSeconds(this)
+    if (intervalSeconds == null) return
+    if (intervalSeconds === 0) {
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.startAlignedMeterValues: Clock-aligned MeterValues disabled by AlignedDataCtrlr.Interval=0`
+      )
+      return
+    }
+    const intervalMs = secondsToMilliseconds(intervalSeconds)
+    if (this.alignedMeterValuesSetTimeout != null) return
+    const generation = this.alignedMeterValuesGeneration
+    const emitCurrentSample = (): Promise<void> =>
+      OCPP20ServiceUtils.emitClockAlignedMeterValues(this, new Date()).catch((error: unknown) => {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.startAlignedMeterValues: Error emitting clock-aligned MeterValues:`,
+          error
+        )
+      })
+    const scheduleNext = (): void => {
+      if (generation !== this.alignedMeterValuesGeneration) return
+      const now = Date.now()
+      const dayStartMs = now - (now % Constants.MS_PER_DAY)
+      const dayEndMs = dayStartMs + Constants.MS_PER_DAY
+      const elapsedTodayMs = now - dayStartMs
+      const nextSlotMs = dayStartMs + (Math.floor(elapsedTodayMs / intervalMs) + 1) * intervalMs
+      const targetMs = Math.min(nextSlotMs, dayEndMs)
+      this.alignedMeterValuesSetTimeout = setTimeout(() => {
+        if (generation !== this.alignedMeterValuesGeneration) return
+        delete this.alignedMeterValuesSetTimeout
+        scheduleNext()
+        emitCurrentSample().catch(logger.error)
+      }, targetMs - now)
+    }
+    scheduleNext()
+    logger.info(
+      `${this.logPrefix()} ${moduleName}.startAlignedMeterValues: Clock-aligned MeterValues timer started every ${formatDurationMilliSeconds(intervalMs)} on UTC-day boundaries`
+    )
+  }
+
+  /**
+   * Starts automatic transaction generation on the specified connectors.
+   * @param connectorIds - Optional array of connector IDs to start ATG on
+   * @param stopAbsoluteDuration - Whether to use absolute duration for stopping
+   */
+  public startAutomaticTransactionGenerator (
+    connectorIds?: number[],
+    stopAbsoluteDuration?: boolean
+  ): void {
+    this.automaticTransactionGenerator = AutomaticTransactionGenerator.getInstance(this)
+    if (isNotEmptyArray(connectorIds)) {
+      for (const connectorId of connectorIds) {
+        this.automaticTransactionGenerator?.startConnector(connectorId, stopAbsoluteDuration)
+      }
+    } else {
+      this.automaticTransactionGenerator?.start(stopAbsoluteDuration)
+    }
+    this.saveAutomaticTransactionGeneratorConfiguration()
+    this.emitChargingStationEvent(ChargingStationEvents.updated)
+  }
+
+  /** Starts the periodic heartbeat to the central server. */
+  public startHeartbeat (): void {
+    const heartbeatInterval = this.getHeartbeatInterval()
+    if (heartbeatInterval > 0 && this.heartbeatSetInterval == null) {
+      this.heartbeatSetInterval = setInterval(() => {
+        this.ocppRequestService
+          .requestHandler<HeartbeatRequest, HeartbeatResponse>(this, RequestCommand.HEARTBEAT)
+          .catch((error: unknown) => {
+            logger.error(
+              `${this.logPrefix()} ${moduleName}.startHeartbeat: Error while sending '${RequestCommand.HEARTBEAT}':`,
+              error
+            )
+          })
+      }, clampToSafeTimerValue(heartbeatInterval))
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.startHeartbeat: Heartbeat started every ${formatDurationMilliSeconds(
+          heartbeatInterval
+        )}`
+      )
+    } else if (this.heartbeatSetInterval != null) {
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.startHeartbeat: Heartbeat already started every ${formatDurationMilliSeconds(
+          heartbeatInterval
+        )}`
+      )
+    } else {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.startHeartbeat: Heartbeat interval set to ${heartbeatInterval.toString()}, not starting the heartbeat`
+      )
+    }
+  }
+
+  /**
+   * Stops the charging station and closes the connection to the central server.
+   * @param reason - Optional reason for stopping
+   * @param stopTransactions - Whether to stop active transactions
+   */
+  public async stop (
+    reason?: StopTransactionReason,
+    stopTransactions = this.stationInfo?.stopTransactionsOnStopped
+  ): Promise<void> {
+    if (this.stopPromise != null) {
+      logger.warn(`${this.logPrefix()} ${moduleName}.stop: Already stopping`)
+      await this.stopPromise
+      return
+    }
+    if (!this.started) {
+      logger.warn(`${this.logPrefix()} ${moduleName}.stop: Already stopped`)
+      return
+    }
+
+    const { promise: stopPromise, reject, resolve } = Promise.withResolvers<undefined>()
+    this.stopPromise = stopPromise
+    this.stopping = true
+    try {
+      if (this.bufferedMessageInFlight != null) {
+        this.bufferedMessageInFlight.stopDrain = true
+        if (this.bufferedMessageInFlight.isRequest) {
+          this.bufferedMessageInFlight.retracted = true
+        }
+      }
+      this.lifecycleAbortController?.abort()
+      // Settle old-generation non-buffered requests before shutdown work starts.
+      // Buffered CALLs remain available for replay.
+      this.ocppRequestService.cancelPendingRequests(this, undefined, false, {
+        handleTransportStartedSends: true,
+      })
+      // Shutdown work uses a fresh generation while operations that began before
+      // stop() observe the aborted generation and release their lifecycle waits.
+      this.lifecycleAbortController = new AbortController()
+      await this.performStop(reason, stopTransactions)
+      resolve(undefined)
+    } catch (error: unknown) {
+      reject(error)
+    } finally {
+      // Drop any coherent sessions still tracked at shutdown so a
+      // subsequent restart cannot resurrect stale state or leak
+      // module-scope runtime PRNG closures.
+      CoherentMeterValuesManager.peekInstance(this)?.dispose()
+      if (this.stopPromise === stopPromise) delete this.stopPromise
+      this.stopping = false
+    }
+    await stopPromise
+  }
+
+  /** Stops the autonomous clock-aligned MeterValues timer. */
+  public stopAlignedMeterValues (): void {
+    this.alignedMeterValuesGeneration++
+    if (this.alignedMeterValuesSetTimeout != null) {
+      clearTimeout(this.alignedMeterValuesSetTimeout)
+      delete this.alignedMeterValuesSetTimeout
+    }
+  }
+
+  /**
+   * Stops automatic transaction generation on the specified connectors.
+   * @param connectorIds - Optional array of connector IDs to stop ATG on
+   */
+  public stopAutomaticTransactionGenerator (connectorIds?: number[]): void {
+    if (isNotEmptyArray(connectorIds)) {
+      for (const connectorId of connectorIds) {
+        this.automaticTransactionGenerator?.stopConnector(connectorId)
+      }
+    } else {
+      this.automaticTransactionGenerator?.stop()
+    }
+    this.saveAutomaticTransactionGeneratorConfiguration()
+    this.emitChargingStationEvent(ChargingStationEvents.updated)
+  }
+
+  public unlockConnector (connectorId: number): void {
+    if (connectorId === 0) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.unlockConnector: connector id 0 is not a physical connector`
+      )
+      return
+    }
+    if (!this.hasConnector(connectorId)) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.unlockConnector: connector id ${connectorId.toString()} does not exist`
+      )
+      return
+    }
+    const connectorStatus = this.getConnectorStatus(connectorId)
+    if (connectorStatus == null) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.unlockConnector: connector id ${connectorId.toString()} status is null`
+      )
+      return
+    }
+    if (connectorStatus.locked !== false) {
+      connectorStatus.locked = false
+      this.emitChargingStationEvent(ChargingStationEvents.connectorStatusChanged, {
+        connectorId,
+        ...connectorStatus,
+      })
+    }
+  }
+
+  private add (): void {
+    this.emitChargingStationEvent(ChargingStationEvents.added)
+  }
+
+  private clearIntervalFlushMessageBuffer (): void {
+    if (this.flushMessageBufferSetInterval != null) {
+      clearInterval(this.flushMessageBufferSetInterval)
+      delete this.flushMessageBufferSetInterval
+    }
+  }
+
+  private discardPersistence (): void {
+    this.persistenceDiscarded = true
+    this.transactionEventQueueSaveDirty = false
+    this.transactionEventQueueSaveImmediate = false
+    ChargingStation.prototype.releaseTransactionEventQueueSaveDelay.call(this)
+    ChargingStation.prototype.rejectTransactionEventQueueSaveWaiters.call(
+      this,
+      new TransactionEventQueuePersistenceDiscardedError(
+        'TransactionEvent queue persistence was discarded by station deletion'
+      )
+    )
+  }
+
+  private async drainTransactionEventQueueSaves (
+    owner: object
+  ): Promise<TransactionEventQueueSaveOutcome> {
+    const lifecycleSignal = this.lifecycleAbortSignal
+    const generationIsCurrent = (): boolean =>
+      this.lifecycleAbortSignal === lifecycleSignal && !this.persistenceDiscarded
+    let saveError: Error | undefined
+    while (this.transactionEventQueueSaveDirty && generationIsCurrent()) {
+      if (!this.transactionEventQueueSaveImmediate) {
+        await ChargingStation.prototype.waitForTransactionEventQueueSaveDelay.call(this)
+        if (!generationIsCurrent()) break
+      }
+      const savedVersion = this.transactionEventQueueMutationVersion
+      this.transactionEventQueueSaveDirty = false
+      this.transactionEventQueueSaveImmediate = false
+      let currentSaveError: Error | undefined
+      this.saveConfiguration(error => {
+        currentSaveError = error
+      })
+      await this.pendingConfigurationSave
+      saveError = currentSaveError
+      if (currentSaveError != null) {
+        this.transactionEventQueueSaveDirty = true
+        ChargingStation.prototype.rejectTransactionEventQueueSaveWaiters.call(
+          this,
+          currentSaveError,
+          savedVersion
+        )
+        break
+      }
+      this.transactionEventQueueCommittedVersion = Math.max(
+        this.transactionEventQueueCommittedVersion,
+        savedVersion
+      )
+      ChargingStation.prototype.resolveTransactionEventQueueSaveWaiters.call(this, savedVersion)
+      if (!generationIsCurrent()) break
+    }
+    if (!generationIsCurrent() && !this.persistenceDiscarded) {
+      this.transactionEventQueueSaveDirty = true
+      saveError ??= new TransactionEventQueuePersistenceSupersededError(
+        'TransactionEvent queue persistence lifecycle generation was superseded'
+      )
+      ChargingStation.prototype.rejectTransactionEventQueueSaveWaiters.call(
+        this,
+        saveError,
+        undefined,
+        lifecycleSignal
+      )
+    }
+    if (this.persistenceDiscarded && saveError == null) {
+      saveError = new TransactionEventQueuePersistenceDiscardedError(
+        'TransactionEvent queue persistence was discarded by station deletion'
+      )
+    }
+    if (this.transactionEventQueueSaveOwner === owner) {
+      delete this.transactionEventQueueSaveOwner
+      delete this.transactionEventQueueSavePromise
+      if (this.transactionEventQueueSaveDirty && !this.persistenceDiscarded) {
+        ChargingStation.prototype.startTransactionEventQueueSave.call(
+          this,
+          !this.transactionEventQueueSaveImmediate
+        )
+      }
+    }
+    return saveError == null ? {} : { error: saveError }
+  }
+
+  private flushMessageBuffer (): void {
+    if (
+      !this.isStopping() &&
+      !this.flushingMessageBuffer &&
+      isNotEmptyArray<string>(this.messageQueue)
+    ) {
+      this.flushingMessageBuffer = true
+      this.sendMessageBuffer(() => {
+        this.flushingMessageBuffer = false
+      })
+    }
+  }
+
+  private getAmperageLimitation (): number | undefined {
+    if (
+      isNotEmptyString(this.stationInfo?.amperageLimitationOcppKey) &&
+      getConfigurationKey(this, this.stationInfo.amperageLimitationOcppKey) != null
+    ) {
+      return (
+        convertToInt(getConfigurationKey(this, this.stationInfo.amperageLimitationOcppKey)?.value) /
+        getAmperageLimitationUnitDivider(this.stationInfo)
+      )
+    }
+  }
+
+  private getCachedRequest (
+    messageType: MessageType | undefined,
+    messageId: string
+  ): CachedRequest | undefined {
+    const cachedRequest = this.requests.get(messageId)
+    if (Array.isArray(cachedRequest)) {
+      return cachedRequest
+    }
+    throw new OCPPError(
+      ErrorType.PROTOCOL_ERROR,
+      `Cached request for message id '${messageId}' ${getMessageTypeString(
+        messageType
+      )} is not an array`,
+      undefined,
+      cachedRequest
+    )
+  }
+
+  private getConfigurationFromFile (): ChargingStationConfiguration | undefined {
+    let configuration: ChargingStationConfiguration | undefined
+    if (isNotEmptyString(this.configurationFile) && existsSync(this.configurationFile)) {
+      try {
+        if (
+          isNotEmptyString(this.configurationFileHash) &&
+          this.sharedLRUCache.hasChargingStationConfiguration(this.configurationFileHash)
+        ) {
+          configuration = this.sharedLRUCache.getChargingStationConfiguration(
+            this.configurationFileHash
+          )
+        } else {
+          const measureId = `${FileType.ChargingStationConfiguration} read`
+          const beginId = PerformanceStatistics.beginMeasure(measureId)
+          configuration = JSON.parse(
+            readFileSync(this.configurationFile, 'utf8')
+          ) as ChargingStationConfiguration
+          PerformanceStatistics.endMeasure(measureId, beginId)
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (configuration == null || isEmpty(configuration)) {
+            logger.error(
+              `${this.logPrefix()} ${moduleName}.getConfigurationFromFile: Invalid charging station configuration file ${
+                this.configurationFile
+              }`
+            )
+            return undefined
+          }
+          if (!isNotEmptyString(configuration.configurationHash)) {
+            logger.error(
+              `${this.logPrefix()} ${moduleName}.getConfigurationFromFile: Missing charging station configuration hash in file ${
+                this.configurationFile
+              }`
+            )
+            return undefined
+          }
+          this.configurationFileHash = configuration.configurationHash
+          this.sharedLRUCache.setChargingStationConfiguration(configuration)
+        }
+      } catch (error) {
+        handleFileException(
+          this.configurationFile,
+          FileType.ChargingStationConfiguration,
+          ensureError(error),
+          this.logPrefix()
+        )
+        if (
+          isNotEmptyString(this.configurationFileHash) &&
+          this.sharedLRUCache.hasChargingStationConfiguration(this.configurationFileHash)
+        ) {
+          logger.warn(
+            `${this.logPrefix()} ${moduleName}.getConfigurationFromFile: Using cached charging station configuration due to file read error`
+          )
+          return this.sharedLRUCache.getChargingStationConfiguration(this.configurationFileHash)
+        }
+      }
+    }
+    return configuration
+  }
+
+  private getConfiguredSupervisionUrl (): URL {
+    let configuredSupervisionUrl: string | undefined
+    const supervisionUrls = this.stationInfo?.supervisionUrls ?? Configuration.getSupervisionUrls()
+    if (isNotEmptyArray(supervisionUrls)) {
+      let configuredSupervisionUrlIndex: number
+      switch (Configuration.getSupervisionUrlDistribution()) {
+        case SupervisionUrlDistribution.RANDOM:
+          configuredSupervisionUrlIndex = Math.floor(secureRandom() * supervisionUrls.length)
+          break
+        case SupervisionUrlDistribution.CHARGING_STATION_AFFINITY:
+        case SupervisionUrlDistribution.ROUND_ROBIN:
+        default: {
+          const supervisionUrlDistribution = Configuration.getSupervisionUrlDistribution()
+          if (
+            supervisionUrlDistribution != null &&
+            !Object.values(SupervisionUrlDistribution).includes(supervisionUrlDistribution)
+          ) {
+            logger.warn(
+              // eslint-disable-next-line @typescript-eslint/no-base-to-string
+              `${this.logPrefix()} ${moduleName}.getConfiguredSupervisionUrl: Unknown supervision url distribution '${supervisionUrlDistribution}' in configuration from values '${SupervisionUrlDistribution.toString()}', defaulting to '${
+                SupervisionUrlDistribution.CHARGING_STATION_AFFINITY
+              }'`
+            )
+          }
+          configuredSupervisionUrlIndex = (this.index - 1) % supervisionUrls.length
+          break
+        }
+      }
+      configuredSupervisionUrl = supervisionUrls[configuredSupervisionUrlIndex]
+    } else if (typeof supervisionUrls === 'string') {
+      configuredSupervisionUrl = supervisionUrls
+    }
+    if (isNotEmptyString(configuredSupervisionUrl)) {
+      return this.parseSupervisionUrl(configuredSupervisionUrl, 'supervisionUrls')
+    }
+    const errorMsg = 'No supervision url(s) configured'
+    logger.error(`${this.logPrefix()} ${moduleName}.getConfiguredSupervisionUrl: ${errorMsg}`)
+    throw new BaseError(errorMsg)
+  }
+
+  private getCurrentOutType (stationInfo?: ChargingStationInfo): CurrentType {
+    return (
+      (stationInfo ?? this.stationInfo)?.currentOutType ??
+      Constants.DEFAULT_STATION_INFO.currentOutType ??
+      CurrentType.AC
+    )
+  }
+
+  private getEnergyActiveImportRegister (
+    connectorStatus: ConnectorStatus | undefined,
+    rounded = false
+  ): number {
+    if (this.stationInfo?.meteringPerTransaction === true) {
+      return (
+        (rounded
+          ? connectorStatus?.transactionEnergyActiveImportRegisterValue != null
+            ? Math.round(connectorStatus.transactionEnergyActiveImportRegisterValue)
+            : undefined
+          : connectorStatus?.transactionEnergyActiveImportRegisterValue) ?? 0
+      )
+    }
+    return (
+      (rounded
+        ? connectorStatus?.energyActiveImportRegisterValue != null
+          ? Math.round(connectorStatus.energyActiveImportRegisterValue)
+          : undefined
+        : connectorStatus?.energyActiveImportRegisterValue) ?? 0
+    )
+  }
+
+  private getMaximumAmperage (stationInfo?: ChargingStationInfo): number | undefined {
+    const localStationInfo = stationInfo ?? this.stationInfo
+    const maximumPower = localStationInfo?.maximumPower
+    if (maximumPower == null || maximumPower <= 0) {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.getMaximumAmperage: maximumPower is ${
+          maximumPower?.toString() ?? 'undefined'
+        }, cannot compute maximum amperage`
+      )
+      return undefined
+    }
+    switch (this.getCurrentOutType(stationInfo)) {
+      case CurrentType.AC:
+        return ACElectricUtils.amperagePerPhaseFromPower(
+          this.getNumberOfPhases(stationInfo),
+          maximumPower / (this.hasEvses ? this.getNumberOfEvses() : this.getNumberOfConnectors()),
+          this.getVoltageOut(stationInfo)
+        )
+      case CurrentType.DC:
+        return DCElectricUtils.amperage(maximumPower, this.getVoltageOut(stationInfo))
+    }
+  }
+
+  private getNumberOfReservableConnectors (): number {
+    return (
+      this.iterateConnectors(true).reduce(
+        (count, { connectorStatus }) =>
+          connectorStatus.status === ConnectorStatusEnum.Available ? count + 1 : count,
+        0
+      ) - this.getNumberOfReservationsOnConnectorZero()
+    )
+  }
+
+  private getNumberOfReservationsOnConnectorZero (): number {
+    if (this.getConnectorStatus(0)?.reservation != null) {
+      return 1
+    }
+    return 0
+  }
+
+  private getOcppConfiguration (
+    ocppPersistentConfiguration: boolean | undefined = this.stationInfo?.ocppPersistentConfiguration
+  ): ChargingStationOcppConfiguration | undefined {
+    let ocppConfiguration: ChargingStationOcppConfiguration | undefined =
+      this.getOcppConfigurationFromFile(ocppPersistentConfiguration)
+    ocppConfiguration ??= this.getOcppConfigurationFromTemplate()
+    return ocppConfiguration
+  }
+
+  private getOcppConfigurationFromFile (
+    ocppPersistentConfiguration?: boolean
+  ): ChargingStationOcppConfiguration | undefined {
+    const configurationKey = this.getConfigurationFromFile()?.configurationKey
+    if (ocppPersistentConfiguration && Array.isArray(configurationKey)) {
+      return { configurationKey }
+    }
+    return undefined
+  }
+
+  private getOcppConfigurationFromTemplate (): ChargingStationOcppConfiguration | undefined {
+    return clone(this.getTemplateFromFile()?.Configuration)
+  }
+
+  private getPowerDivider (): number {
+    let powerDivider = this.hasEvses ? this.getNumberOfEvses() : this.getNumberOfConnectors()
+    if (this.stationInfo?.powerSharedByConnectors === true) {
+      powerDivider = this.getNumberOfRunningTransactions()
+    }
+    return powerDivider
+  }
+
+  private getReconnectDelay (): number {
+    if (isOCPP20x(this.stationInfo?.ocppVersion)) {
+      return OCPP20ServiceUtils.computeReconnectDelay(this, this.wsConnectionRetryCount)
+    }
+    return this.stationInfo?.reconnectExponentialDelay === true
+      ? computeExponentialBackOffDelay({
+        baseDelayMs: Constants.DEFAULT_EXPONENTIAL_BACKOFF_BASE_DELAY_MS,
+        jitterPercent: Constants.DEFAULT_RECONNECT_JITTER_PERCENT,
+        retryNumber: this.wsConnectionRetryCount,
+      })
+      : secondsToMilliseconds(Constants.DEFAULT_WS_RECONNECT_DELAY_SECONDS)
+  }
+
+  private getStationInfo (options?: ChargingStationOptions): ChargingStationInfo {
+    const { stationInfo: stationInfoFromTemplate, stationTemplate } =
+      this.getStationInfoFromTemplate()
+    options?.persistentConfiguration != null &&
+      (stationInfoFromTemplate.stationInfoPersistentConfiguration = options.persistentConfiguration)
+    const stationInfoFromFile = this.getStationInfoFromFile(
+      stationInfoFromTemplate.stationInfoPersistentConfiguration
+    )
+    let stationInfo: ChargingStationInfo
+    // Priority:
+    // 1. charging station info from template
+    // 2. charging station info from configuration file
+    if (
+      stationInfoFromFile != null &&
+      stationInfoFromFile.templateHash === stationInfoFromTemplate.templateHash
+    ) {
+      stationInfo = stationInfoFromFile
+    } else {
+      stationInfo = stationInfoFromTemplate
+      stationInfoFromFile != null &&
+        propagateSerialNumber(stationTemplate, stationInfoFromFile, stationInfo)
+    }
+    stationInfo = setChargingStationOptions(
+      mergeDeepRight(Constants.DEFAULT_STATION_INFO as ChargingStationInfo, stationInfo),
+      options
+    )
+    // getNumberOfPhases owns this derived default, but raw consumers (UI data payload,
+    // persisted configuration) read stationInfo directly. Seed it post-merge so
+    // those paths — and persisted configs predating the field — get the effective value.
+    stationInfo.numberOfPhases = this.getNumberOfPhases(stationInfo)
+    stationInfo.chargingStationId = getChargingStationId(this.index, stationInfo)
+    stationInfo.hashId = getHashId(this.index, stationTemplate, stationInfo.chargingStationId)
+    return stationInfo
+  }
+
+  private getStationInfoFromFile (
+    stationInfoPersistentConfiguration: boolean | undefined = Constants.DEFAULT_STATION_INFO
+      .stationInfoPersistentConfiguration
+  ): ChargingStationInfo | undefined {
+    let stationInfo: ChargingStationInfo | undefined
+    if (stationInfoPersistentConfiguration) {
+      stationInfo = this.getConfigurationFromFile()?.stationInfo
+      if (stationInfo != null) {
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- pruning the deprecated `infoHash` field from the persisted-configuration snapshot before use
+        delete stationInfo.infoHash
+        delete (stationInfo as ChargingStationTemplate).numberOfConnectors
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        stationInfo.templateIndex ??= this.index
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        stationInfo.templateName ??= buildTemplateName(this.templateFile)
+      }
+    }
+    return stationInfo
+  }
+
+  private getStationInfoFromTemplate (): {
+    stationInfo: ChargingStationInfo
+    stationTemplate: ChargingStationTemplate
+  } {
+    const stationTemplate = this.getTemplateFromFile()
+    if (stationTemplate == null) {
+      const errorMsg = `Failed to read charging station template file ${this.templateFile}`
+      logger.error(`${this.logPrefix()} ${moduleName}.getStationInfoFromTemplate: ${errorMsg}`)
+      throw new BaseError(errorMsg)
+    }
+    const stationInfo = stationTemplateToStationInfo(stationTemplate)
+    stationInfo.templateIndex = this.index
+    stationInfo.templateName = buildTemplateName(this.templateFile)
+    createSerialNumber(stationTemplate, stationInfo)
+    stationInfo.voltageOut = this.getVoltageOut(stationInfo)
+    if (
+      this.getCurrentOutType(stationInfo) === CurrentType.AC &&
+      (stationInfo.voltageOut === Voltage.VOLTAGE_400 ||
+        stationInfo.voltageOut === Voltage.VOLTAGE_800)
+    ) {
+      const voltageOut = stationInfo.voltageOut
+      const derivedInfo =
+        this.getNumberOfPhases(stationInfo) === 3
+          ? ` In 3-phase Y systems the derived line-to-line = sqrt(3) * ${voltageOut.toString()} = ${(
+              Math.sqrt(3) * voltageOut
+            ).toFixed(0)} V.`
+          : ''
+      const suggestion =
+        voltageOut === Voltage.VOLTAGE_400
+          ? ` If you intended 400 V line-to-line, set voltageOut=${Voltage.VOLTAGE_230.toString()} V (standard L-N enum value for EU 3-phase).`
+          : ` No standard L-N enum value exists for ${voltageOut.toString()} V line-to-line (~${(
+              voltageOut / Math.sqrt(3)
+            ).toFixed(0)} V L-N); verify template voltageOut intent.`
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.getStationInfoFromTemplate: voltageOut=${voltageOut.toString()} V matches a line-to-line nominal value; the simulator treats voltageOut as line-to-neutral (phase voltage).${derivedInfo}${suggestion}`
+      )
+    }
+    if (isNotEmptyArray<number>(stationTemplate.power)) {
+      const powerArrayRandomIndex = Math.floor(secureRandom() * stationTemplate.power.length)
+      stationInfo.maximumPower =
+        stationTemplate.powerUnit === PowerUnits.KILO_WATT
+          ? stationTemplate.power[powerArrayRandomIndex] * Constants.UNIT_DIVIDER_KILO
+          : stationTemplate.power[powerArrayRandomIndex]
+    } else if (typeof stationTemplate.power === 'number') {
+      stationInfo.maximumPower =
+        stationTemplate.powerUnit === PowerUnits.KILO_WATT
+          ? stationTemplate.power * Constants.UNIT_DIVIDER_KILO
+          : stationTemplate.power
+    }
+    stationInfo.maximumAmperage = this.getMaximumAmperage(stationInfo)
+    if (
+      isNotEmptyString(stationInfo.firmwareVersionPattern) &&
+      isNotEmptyString(stationInfo.firmwareVersion) &&
+      !new RegExp(stationInfo.firmwareVersionPattern).test(stationInfo.firmwareVersion)
+    ) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.getStationInfoFromTemplate: Firmware version '${stationInfo.firmwareVersion}' in template file ${
+          this.templateFile
+        } does not match firmware version pattern '${stationInfo.firmwareVersionPattern}'`
+      )
+    }
+    if (stationTemplate.resetTime != null) {
+      stationInfo.resetTime = secondsToMilliseconds(stationTemplate.resetTime)
+    }
+    return { stationInfo, stationTemplate }
+  }
+
+  private getTemplateFromFile (): ChargingStationTemplate | undefined {
+    let template: ChargingStationTemplate | undefined
+    try {
+      if (this.sharedLRUCache.hasChargingStationTemplate(this.templateFileHash)) {
+        template = this.sharedLRUCache.getChargingStationTemplate(this.templateFileHash)
+      } else {
+        const measureId = `${FileType.ChargingStationTemplate} read`
+        const beginId = PerformanceStatistics.beginMeasure(measureId)
+        const rawContent = readFileSync(this.templateFile, 'utf8')
+        const parsed = JSON.parse(rawContent) as Record<string, unknown>
+        template = validateTemplate(parsed, this.templateFile)
+        PerformanceStatistics.endMeasure(measureId, beginId)
+        // SRI-style key `${algorithm}:${schemaVersion}:${contentHash}`.
+        // Hashing the validated template (not the raw file) keeps the key
+        // stable across cosmetic whitespace edits; the algorithm and version
+        // prefixes ensure cache entries are invalidated when either bumps.
+        const contentHash = hash(Constants.DEFAULT_HASH_ALGORITHM, JSON.stringify(template), 'hex')
+        template.templateHash = `${Constants.DEFAULT_HASH_ALGORITHM}:${CURRENT_SCHEMA_VERSION.toString()}:${contentHash}`
+        this.sharedLRUCache.setChargingStationTemplate(template)
+        this.templateFileHash = template.templateHash
+      }
+    } catch (error) {
+      handleFileException(
+        this.templateFile,
+        FileType.ChargingStationTemplate,
+        ensureError(error),
+        this.logPrefix()
+      )
+    }
+    return template
+  }
+
+  private getUseConnectorId0 (stationTemplate?: ChargingStationTemplate): boolean {
+    return (
+      stationTemplate?.useConnectorId0 ?? Constants.DEFAULT_STATION_INFO.useConnectorId0 ?? true
+    )
+  }
+
+  private handleErrorMessage (errorResponse: ErrorResponse): void {
+    const [messageType, messageId, errorType, errorMessage, errorDetails] = errorResponse
+    if (!this.requests.has(messageId)) {
+      // Error
+      throw new OCPPError(
+        ErrorType.INTERNAL_ERROR,
+        `Error response for unknown message id '${messageId}'`,
+        undefined,
+        { errorDetails, errorMessage, errorType }
+      )
+    }
+    const cachedRequest = this.getCachedRequest(messageType, messageId)
+    if (cachedRequest == null) {
+      throw new OCPPError(
+        ErrorType.INTERNAL_ERROR,
+        `Cached request for error message id '${messageId}' is nullish`,
+        undefined,
+        { errorDetails, errorMessage, errorType }
+      )
+    }
+    const [, errorCallback, requestCommandName] = cachedRequest
+    logger.debug(
+      `${this.logPrefix()} ${moduleName}.handleErrorMessage: << Command '${requestCommandName}' received error response payload: ${JSON.stringify(
+        errorResponse
+      )}`
+    )
+    errorCallback(new OCPPError(errorType, errorMessage, requestCommandName, errorDetails))
+  }
+
+  private async handleIncomingMessage (
+    request: IncomingRequest,
+    messageLifecycleSignal: AbortSignal,
+    messageLifecycleIsCurrent: () => boolean,
+    messageSourceIsCurrent: () => boolean
+  ): Promise<void> {
+    const [messageType, messageId, commandName, commandPayload] = request
+    if (this.requests.has(messageId)) {
+      throw new OCPPError(
+        ErrorType.SECURITY_ERROR,
+        `Received message with duplicate message id '${messageId}'`,
+        commandName,
+        commandPayload
+      )
+    }
+    this.recordRequestStatistic(commandName, messageType)
+    logger.debug(
+      `${this.logPrefix()} ${moduleName}.handleIncomingMessage: << Command '${commandName}' received request payload: ${JSON.stringify(
+        request
+      )}`
+    )
+    await this.ocppIncomingRequestService.incomingRequestHandler(
+      this,
+      messageId,
+      commandName,
+      commandPayload,
+      messageLifecycleSignal,
+      messageLifecycleIsCurrent,
+      messageSourceIsCurrent
+    )
+    this.emitChargingStationEvent(ChargingStationEvents.updated)
+  }
+
+  private handleResponseMessage (response: Response): void {
+    const [messageType, messageId, commandPayload] = response
+    if (!this.requests.has(messageId)) {
+      // Error
+      throw new OCPPError(
+        ErrorType.INTERNAL_ERROR,
+        `Response for unknown message id '${messageId}'`,
+        undefined,
+        commandPayload
+      )
+    }
+    // Respond
+    const cachedRequest = this.getCachedRequest(messageType, messageId)
+    if (cachedRequest == null) {
+      throw new OCPPError(
+        ErrorType.INTERNAL_ERROR,
+        `Cached request for response message id '${messageId}' is nullish`,
+        undefined,
+        commandPayload
+      )
+    }
+    const [responseCallback, , requestCommandName, requestPayload] = cachedRequest
+    logger.debug(
+      `${this.logPrefix()} ${moduleName}.handleResponseMessage: << Command '${requestCommandName}' received response payload: ${JSON.stringify(
+        response
+      )}`
+    )
+    responseCallback(commandPayload, requestPayload)
+  }
+
+  private handleUnsupportedVersion (version: OCPPVersion | undefined): void {
+    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+    const errorMsg = `Unsupported protocol version '${version}' configured in template file ${this.templateFile}`
+    logger.error(`${this.logPrefix()} ${moduleName}.handleUnsupportedVersion: ${errorMsg}`)
+    throw new BaseError(errorMsg)
+  }
+
+  private initialize (options?: ChargingStationOptions): void {
+    const restorePersistedTransactions = !this.started && !this.starting
+    const stationTemplate = this.getTemplateFromFile()
+    if (stationTemplate == null) {
+      const errorMsg = `Failed to read charging station template file ${this.templateFile}`
+      logger.error(`${this.logPrefix()} ${moduleName}.initialize: ${errorMsg}`)
+      throw new BaseError(errorMsg)
+    }
+    this.configurationFile = join(
+      getStationConfigurationDir(this.templateFile),
+      `${getHashId(this.index, stationTemplate)}.json`
+    )
+    const stationConfiguration = this.getConfigurationFromFile()
+    if (
+      stationConfiguration?.stationInfo?.templateHash === stationTemplate.templateHash &&
+      (stationConfiguration?.connectorsStatus != null || stationConfiguration?.evsesStatus != null)
+    ) {
+      checkConfiguration(stationConfiguration, this.logPrefix(), this.configurationFile)
+      this.initializeConnectorsOrEvsesFromFile(
+        stationConfiguration,
+        stationTemplate,
+        options?.persistentConfiguration,
+        restorePersistedTransactions
+      )
+    } else {
+      this.initializeConnectorsOrEvsesFromTemplate(stationTemplate)
+    }
+    this.stationInfo = this.getStationInfo(options)
+    validateStationInfo(this)
+    if (
+      this.stationInfo.firmwareStatus === FirmwareStatus.Installing &&
+      isNotEmptyString(this.stationInfo.firmwareVersionPattern) &&
+      isNotEmptyString(this.stationInfo.firmwareVersion)
+    ) {
+      const patternGroup =
+        this.stationInfo.firmwareUpgrade?.versionUpgrade?.patternGroup ??
+        this.stationInfo.firmwareVersion.split('.').length
+      const match = new RegExp(this.stationInfo.firmwareVersionPattern)
+        .exec(this.stationInfo.firmwareVersion)
+        ?.slice(1, patternGroup + 1)
+      if (match != null) {
+        const patchLevelIndex = match.length - 1
+        match[patchLevelIndex] = (
+          convertToInt(match[patchLevelIndex]) +
+          (this.stationInfo.firmwareUpgrade?.versionUpgrade?.step ?? 1)
+        ).toString()
+        this.stationInfo.firmwareVersion = match.join('.')
+      }
+    }
+    this.saveStationInfo()
+    // Warm up the coherent MeterValues manager on opt-in so
+    // EV-profile-file warnings surface at startup, and reload profiles
+    // on every subsequent `initialize()` (reset, template file change)
+    // to propagate template mutations. On opt-out we deliberately
+    // leave any pre-existing manager in place: new sessions are
+    // already blocked by the `coherentMeterValues` gate in
+    // `createSession`, and in-flight sessions drain via
+    // `destroyCoherentSession` on transaction end — preserving
+    // provenance of transactions started before the flag flip.
+    if (this.stationInfo.coherentMeterValues === true) {
+      CoherentMeterValuesManager.getInstance(this)?.reloadEvProfiles()
+    }
+    this.configuredSupervisionUrl = this.getConfiguredSupervisionUrl()
+    if (this.stationInfo.enableStatistics === true) {
+      this.performanceStatistics = PerformanceStatistics.getInstance(
+        this.stationInfo.hashId,
+        this.stationInfo.chargingStationId,
+        this.configuredSupervisionUrl
+      )
+    }
+    const bootNotificationRequest = buildBootNotificationRequest(this.stationInfo)
+    if (bootNotificationRequest == null) {
+      const errorMsg = 'Error while creating boot notification request'
+      logger.error(`${this.logPrefix()} ${moduleName}.initialize: ${errorMsg}`)
+      throw new BaseError(errorMsg)
+    }
+    this.bootNotificationRequest = bootNotificationRequest
+    this.powerDivider = this.getPowerDivider()
+    // OCPP configuration
+    this.ocppConfiguration = this.getOcppConfiguration(options?.persistentConfiguration)
+    warnOnOCPP16TemplateKeys(this)
+    this.initializeOcppConfiguration()
+    this.initializeOcppServices()
+    const transactionEventRequestValidator = isOCPP20x(this.stationInfo.ocppVersion)
+      ? (request: OCPP20TransactionEventRequest): boolean => {
+          try {
+            return this.ocppRequestService.validateRequestPayload(
+              this,
+              RequestCommand.TRANSACTION_EVENT,
+              request,
+              { forceValidation: true }
+            )
+          } catch {
+            return false
+          }
+        }
+      : undefined
+    const queueNormalizationPhaseCount = Math.max(1, this.getNumberOfPhases())
+    const queueInletToOutputEfficiency =
+      this.stationInfo.currentOutType === CurrentType.DC
+        ? (this.stationInfo.conversionEfficiency ?? 1)
+        : 1
+    if (restorePersistedTransactions) {
+      for (const { connectorId, connectorStatus, evseId } of this.iterateConnectors()) {
+        preparePersistedTransactionEventQueue(
+          connectorStatus,
+          transactionEventRequestValidator,
+          evseId ?? connectorId,
+          connectorId,
+          queueNormalizationPhaseCount,
+          queueInletToOutputEfficiency
+        )
+      }
+    }
+    if (this.stationInfo.autoRegister === true) {
+      this.bootNotificationResponse = {
+        currentTime: new Date(),
+        interval: millisecondsToSeconds(this.getHeartbeatInterval()),
+        status: RegistrationStatusEnumType.ACCEPTED,
+      }
+    }
+  }
+
+  private initializeConnectorsFromTemplate (stationTemplate: ChargingStationTemplate): void {
+    if (stationTemplate.Connectors == null && isEmpty(this.connectors)) {
+      const errorMsg = `No already defined connectors and charging station information from template ${this.templateFile} with no connectors configuration defined`
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsFromTemplate: ${errorMsg}`
+      )
+      throw new BaseError(errorMsg)
+    }
+    if (stationTemplate.Connectors?.[0] == null) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsFromTemplate: Charging station information from template ${
+          this.templateFile
+        } with no connector id 0 configuration`
+      )
+    }
+    if (stationTemplate.Connectors != null) {
+      const configuredMaxConnectors = getConfiguredMaxNumberOfConnectors(stationTemplate)
+      const templateMaxConnectors = getMaxNumberOfConnectors(stationTemplate.Connectors)
+      const templateMaxAvailableConnectors =
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        stationTemplate.Connectors[0] != null ? templateMaxConnectors - 1 : templateMaxConnectors
+      const connectorsConfigHash = hash(
+        Constants.DEFAULT_HASH_ALGORITHM,
+        `${JSON.stringify(stationTemplate.Connectors)}${configuredMaxConnectors.toString()}`,
+        'hex'
+      )
+      const connectorsConfigChanged =
+        !isEmpty(this.connectors) && this.connectorsConfigurationHash !== connectorsConfigHash
+      if (isEmpty(this.connectors) || connectorsConfigChanged) {
+        connectorsConfigChanged && this.connectors.clear()
+        this.connectorsConfigurationHash = connectorsConfigHash
+        if (templateMaxConnectors > 0) {
+          for (let connectorId = 0; connectorId <= configuredMaxConnectors; connectorId++) {
+            if (
+              connectorId === 0 &&
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+              (stationTemplate.Connectors[connectorId] == null ||
+                !this.getUseConnectorId0(stationTemplate))
+            ) {
+              continue
+            }
+            const templateConnectorId =
+              connectorId > 0 && stationTemplate.randomConnectors === true
+                ? randomInt(1, templateMaxAvailableConnectors + 1)
+                : connectorId
+            const connectorStatus = stationTemplate.Connectors[templateConnectorId]
+            checkStationInfoConnectorStatus(
+              templateConnectorId,
+              connectorStatus,
+              this.logPrefix(),
+              this.templateFile
+            )
+            this.connectors.set(connectorId, clone(connectorStatus))
+          }
+          initializeConnectorsMapStatus(
+            this.connectors,
+            this.logPrefix(),
+            getDefaultConnectorMaximumPower(stationTemplate)
+          )
+          this.saveConnectorsStatus()
+        } else {
+          logger.warn(
+            `${this.logPrefix()} ${moduleName}.initializeConnectorsFromTemplate: Charging station information from template ${
+              this.templateFile
+            } with no connectors configuration defined, cannot create connectors`
+          )
+        }
+      }
+    } else {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsFromTemplate: Charging station information from template ${
+          this.templateFile
+        } with no connectors configuration defined, using already defined connectors`
+      )
+    }
+  }
+
+  private initializeConnectorsOrEvsesFromFile (
+    configuration: ChargingStationConfiguration,
+    stationTemplate: ChargingStationTemplate,
+    persistentConfiguration?: boolean,
+    restorePersistedTransactions = true
+  ): void {
+    const usePersistedStationInfo =
+      persistentConfiguration ??
+      stationTemplate.stationInfoPersistentConfiguration ??
+      Constants.DEFAULT_STATION_INFO.stationInfoPersistentConfiguration
+    const electricalStationInfo = usePersistedStationInfo
+      ? configuration.stationInfo
+      : stationTemplate
+    const currentOutType =
+      electricalStationInfo?.currentOutType ??
+      Constants.DEFAULT_STATION_INFO.currentOutType ??
+      CurrentType.AC
+    const physicalNumberOfPhases =
+      currentOutType === CurrentType.DC ? 0 : (electricalStationInfo?.numberOfPhases ?? 3)
+    const normalizationPhaseCount = Math.max(1, physicalNumberOfPhases)
+    const inletToOutputEfficiency =
+      currentOutType === CurrentType.DC ? (electricalStationInfo?.conversionEfficiency ?? 1) : 1
+    if (configuration.connectorsStatus != null && configuration.evsesStatus == null) {
+      const isTupleFormat =
+        isNotEmptyArray(configuration.connectorsStatus) &&
+        Array.isArray(configuration.connectorsStatus[0])
+      const entries: [number, ConnectorStatus][] = isTupleFormat
+        ? (configuration.connectorsStatus as [number, ConnectorStatus][])
+        : (configuration.connectorsStatus as ConnectorStatus[]).map((status, index) => [
+            index,
+            status,
+          ])
+      for (const [connectorId, connectorStatus] of entries) {
+        const liveConnectorStatus = this.connectors.get(connectorId)
+        this.connectors.set(
+          connectorId,
+          !restorePersistedTransactions && liveConnectorStatus != null
+            ? liveConnectorStatus
+            : prepareConnectorStatus(
+              clone(connectorStatus),
+              normalizationPhaseCount,
+              inletToOutputEfficiency,
+              restorePersistedTransactions
+            )
+        )
+      }
+    } else if (configuration.evsesStatus != null && configuration.connectorsStatus == null) {
+      const isTupleFormat =
+        isNotEmptyArray(configuration.evsesStatus) && Array.isArray(configuration.evsesStatus[0])
+      const evseEntries: [number, EvseStatusConfiguration][] = isTupleFormat
+        ? (configuration.evsesStatus as [number, EvseStatusConfiguration][])
+        : (configuration.evsesStatus as EvseStatusConfiguration[]).map((status, index) => [
+            index,
+            status,
+          ])
+      for (const [evseId, evseStatusConfiguration] of evseEntries) {
+        const evseStatus = clone(evseStatusConfiguration)
+        if (
+          typeof evseStatus.energyActiveImportRegisterValue !== 'number' ||
+          !Number.isFinite(evseStatus.energyActiveImportRegisterValue) ||
+          evseStatus.energyActiveImportRegisterValue < 0
+        ) {
+          delete evseStatus.energyActiveImportRegisterValue
+        }
+        if (
+          typeof evseStatus.energyActiveImportIntervalBaseline !== 'number' ||
+          !Number.isFinite(evseStatus.energyActiveImportIntervalBaseline) ||
+          evseStatus.energyActiveImportIntervalBaseline < 0
+        ) {
+          delete evseStatus.energyActiveImportIntervalBaseline
+        }
+        delete evseStatus.connectorsStatus
+        const connIsTupleFormat =
+          evseStatusConfiguration.connectorsStatus != null &&
+          isNotEmptyArray(evseStatusConfiguration.connectorsStatus) &&
+          Array.isArray(evseStatusConfiguration.connectorsStatus[0])
+        const connEntries: [number, ConnectorStatus][] = connIsTupleFormat
+          ? (evseStatusConfiguration.connectorsStatus as [number, ConnectorStatus][])
+          : ((evseStatusConfiguration.connectorsStatus ?? []) as ConnectorStatus[]).map(
+              (status, index) => [index, status]
+            )
+        const templateEvse = stationTemplate.Evses?.[evseId]
+        if (templateEvse == null) {
+          logger.warn(
+            `${this.logPrefix()} ${moduleName}.initializeConnectorsOrEvsesFromFile: Ignoring persisted EVSE ${evseId.toString()} absent from template ${this.templateFile}`
+          )
+          continue
+        }
+        const templateMeterValues = templateEvse.MeterValues
+        const liveEvseStatus = this.evses.get(evseId)
+        if (!restorePersistedTransactions && liveEvseStatus != null) {
+          // Preserve live baselines and pending delivery ownership across hot reloads.
+          liveEvseStatus.MeterValues = clone(templateMeterValues ?? [])
+          continue
+        }
+        this.evses.set(evseId, {
+          ...(evseStatus as EvseStatus),
+          connectors: new Map<number, ConnectorStatus>(
+            connEntries.map(([connectorId, connectorStatus]) => [
+              connectorId,
+              prepareConnectorStatus(
+                connectorStatus,
+                normalizationPhaseCount,
+                inletToOutputEfficiency,
+                restorePersistedTransactions
+              ),
+            ])
+          ),
+          MeterValues: clone(templateMeterValues ?? []),
+        })
+      }
+    } else if (configuration.evsesStatus != null && configuration.connectorsStatus != null) {
+      const errorMsg = `Connectors and evses defined at the same time in configuration file ${this.configurationFile}`
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsOrEvsesFromFile: ${errorMsg}`
+      )
+      throw new BaseError(errorMsg)
+    } else {
+      const errorMsg = `No connectors or evses defined in configuration file ${this.configurationFile}`
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsOrEvsesFromFile: ${errorMsg}`
+      )
+      throw new BaseError(errorMsg)
+    }
+  }
+
+  private initializeConnectorsOrEvsesFromTemplate (stationTemplate: ChargingStationTemplate): void {
+    if (stationTemplate.Connectors != null && stationTemplate.Evses == null) {
+      this.initializeConnectorsFromTemplate(stationTemplate)
+    } else if (stationTemplate.Evses != null && stationTemplate.Connectors == null) {
+      this.initializeEvsesFromTemplate(stationTemplate)
+    } else if (stationTemplate.Evses != null && stationTemplate.Connectors != null) {
+      const errorMsg = `Connectors and evses defined at the same time in template file ${this.templateFile}`
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsOrEvsesFromTemplate: ${errorMsg}`
+      )
+      throw new BaseError(errorMsg)
+    } else {
+      const errorMsg = `No connectors or evses defined in template file ${this.templateFile}`
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.initializeConnectorsOrEvsesFromTemplate: ${errorMsg}`
+      )
+      throw new BaseError(errorMsg)
+    }
+  }
+
+  private initializeEvsesFromTemplate (stationTemplate: ChargingStationTemplate): void {
+    if (stationTemplate.Evses == null && isEmpty(this.evses)) {
+      const errorMsg = `No already defined evses and charging station information from template ${this.templateFile} with no evses configuration defined`
+      logger.error(`${this.logPrefix()} ${moduleName}.initializeEvsesFromTemplate: ${errorMsg}`)
+      throw new BaseError(errorMsg)
+    }
+    if (stationTemplate.Evses?.[0] == null) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.initializeEvsesFromTemplate: Charging station information from template ${
+          this.templateFile
+        } with no evse id 0 configuration`
+      )
+    }
+    if (stationTemplate.Evses?.[0]?.Connectors[0] == null) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.initializeEvsesFromTemplate: Charging station information from template ${
+          this.templateFile
+        } with evse id 0 with no connector id 0 configuration`
+      )
+    }
+    if (Object.keys(stationTemplate.Evses?.[0]?.Connectors as object).length > 1) {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.initializeEvsesFromTemplate: Charging station information from template ${
+          this.templateFile
+        } with evse id 0 with more than one connector configuration, only connector id 0 configuration will be used`
+      )
+    }
+    if (stationTemplate.Evses != null) {
+      const evsesConfigHash = hash(
+        Constants.DEFAULT_HASH_ALGORITHM,
+        JSON.stringify(stationTemplate.Evses),
+        'hex'
+      )
+      const evsesConfigChanged =
+        !isEmpty(this.evses) && this.evsesConfigurationHash !== evsesConfigHash
+      if (isEmpty(this.evses) || evsesConfigChanged) {
+        evsesConfigChanged && this.evses.clear()
+        this.evsesConfigurationHash = evsesConfigHash
+        const templateMaxEvses = getMaxNumberOfEvses(stationTemplate.Evses)
+        if (templateMaxEvses > 0) {
+          for (const evseKey in stationTemplate.Evses) {
+            const evseId = convertToInt(evseKey)
+            const evseStatus: EvseStatus = {
+              availability: AvailabilityType.Operative,
+              connectors: buildConnectorsMap(
+                stationTemplate.Evses[evseKey].Connectors,
+                this.logPrefix(),
+                this.templateFile
+              ),
+              ...(isNotEmptyArray(stationTemplate.Evses[evseKey].MeterValues) && {
+                MeterValues: clone(stationTemplate.Evses[evseKey].MeterValues),
+              }),
+            }
+            this.evses.set(evseId, evseStatus)
+            initializeConnectorsMapStatus(
+              evseStatus.connectors,
+              this.logPrefix(),
+              getDefaultConnectorMaximumPower(stationTemplate)
+            )
+          }
+          this.saveEvsesStatus()
+        } else {
+          logger.warn(
+            `${this.logPrefix()} ${moduleName}.initializeEvsesFromTemplate: Charging station information from template ${
+              this.templateFile
+            } with no evses configuration defined, cannot create evses`
+          )
+        }
+      }
+    } else {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.initializeEvsesFromTemplate: Charging station information from template ${
+          this.templateFile
+        } with no evses configuration defined, using already defined evses`
+      )
+    }
+  }
+
+  private initializeOcppConfiguration (): void {
+    if (getConfigurationKey(this, StandardParametersKey.HeartbeatInterval) == null) {
+      addConfigurationKey(this, StandardParametersKey.HeartbeatInterval, '0')
+    }
+    if (getConfigurationKey(this, StandardParametersKey.HeartBeatInterval) == null) {
+      addConfigurationKey(this, StandardParametersKey.HeartBeatInterval, '0', {
+        visible: false,
+      })
+    }
+    if (
+      isSupervisionOcppKeyActive(this) &&
+      getConfigurationKey(this, this.stationInfo.supervisionUrlOcppKey) == null
+    ) {
+      addConfigurationKey(
+        this,
+        this.stationInfo.supervisionUrlOcppKey,
+        this.configuredSupervisionUrl.href,
+        { reboot: true }
+      )
+    } else if (
+      this.stationInfo?.supervisionUrlOcppConfiguration === false &&
+      isNotEmptyString(this.stationInfo.supervisionUrlOcppKey) &&
+      getConfigurationKey(this, this.stationInfo.supervisionUrlOcppKey) != null
+    ) {
+      deleteConfigurationKey(this, this.stationInfo.supervisionUrlOcppKey, {
+        save: false,
+      })
+    }
+    if (getConfigurationKey(this, VendorParametersKey.SampledDataSignReadings) == null) {
+      addConfigurationKey(this, VendorParametersKey.SampledDataSignReadings, 'false', {
+        readonly: false,
+      })
+    }
+    if (getConfigurationKey(this, VendorParametersKey.AlignedDataSignReadings) == null) {
+      addConfigurationKey(this, VendorParametersKey.AlignedDataSignReadings, 'false', {
+        readonly: false,
+      })
+    }
+    if (getConfigurationKey(this, VendorParametersKey.SampledDataSignStartedReadings) == null) {
+      addConfigurationKey(this, VendorParametersKey.SampledDataSignStartedReadings, 'false', {
+        readonly: false,
+      })
+    }
+    if (getConfigurationKey(this, VendorParametersKey.SampledDataSignUpdatedReadings) == null) {
+      addConfigurationKey(this, VendorParametersKey.SampledDataSignUpdatedReadings, 'false', {
+        readonly: false,
+      })
+    }
+    if (getConfigurationKey(this, VendorParametersKey.AlignedDataSignUpdatedReadings) == null) {
+      addConfigurationKey(this, VendorParametersKey.AlignedDataSignUpdatedReadings, 'false', {
+        readonly: false,
+      })
+    }
+    if (getConfigurationKey(this, VendorParametersKey.PublicKeyWithSignedMeterValue) == null) {
+      addConfigurationKey(
+        this,
+        VendorParametersKey.PublicKeyWithSignedMeterValue,
+        PublicKeyWithSignedMeterValueEnumType.Never,
+        {
+          readonly: false,
+        }
+      )
+    }
+    if (getConfigurationKey(this, VendorParametersKey.StartTxnSampledData) == null) {
+      addConfigurationKey(this, VendorParametersKey.StartTxnSampledData, '', {
+        readonly: false,
+      })
+    }
+    if (
+      isNotEmptyString(this.stationInfo?.amperageLimitationOcppKey) &&
+      getConfigurationKey(this, this.stationInfo.amperageLimitationOcppKey) == null
+    ) {
+      const maximumAmperage = this.stationInfo.maximumAmperage
+      if (maximumAmperage != null && maximumAmperage > 0) {
+        addConfigurationKey(
+          this,
+          this.stationInfo.amperageLimitationOcppKey,
+          // prettier-ignore
+          (maximumAmperage * getAmperageLimitationUnitDivider(this.stationInfo)).toString()
+        )
+      } else {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.initializeOcppConfiguration: maximumAmperage is ${
+            maximumAmperage?.toString() ?? 'undefined'
+          }, cannot set amperage limitation configuration key`
+        )
+      }
+    }
+    if (getConfigurationKey(this, StandardParametersKey.SupportedFeatureProfiles) == null) {
+      addConfigurationKey(
+        this,
+        StandardParametersKey.SupportedFeatureProfiles,
+        `${SupportedFeatureProfiles.Core},${SupportedFeatureProfiles.FirmwareManagement},${SupportedFeatureProfiles.LocalAuthListManagement},${SupportedFeatureProfiles.SmartCharging},${SupportedFeatureProfiles.RemoteTrigger}`
+      )
+    }
+    addConfigurationKey(
+      this,
+      StandardParametersKey.NumberOfConnectors,
+      this.getNumberOfConnectors().toString(),
+      { readonly: true },
+      { overwrite: true }
+    )
+    if (getConfigurationKey(this, StandardParametersKey.MeterValuesSampledData) == null) {
+      addConfigurationKey(
+        this,
+        StandardParametersKey.MeterValuesSampledData,
+        MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
+      )
+    }
+    if (getConfigurationKey(this, StandardParametersKey.ConnectorPhaseRotation) == null) {
+      const connectorsPhaseRotation: string[] = []
+      for (const { connectorId } of this.iterateConnectors()) {
+        const phaseRotation = getPhaseRotationValue(connectorId, this.getNumberOfPhases())
+        if (phaseRotation != null) {
+          connectorsPhaseRotation.push(phaseRotation)
+        }
+      }
+      addConfigurationKey(
+        this,
+        StandardParametersKey.ConnectorPhaseRotation,
+        connectorsPhaseRotation.toString()
+      )
+    }
+    if (getConfigurationKey(this, StandardParametersKey.AuthorizeRemoteTxRequests) == null) {
+      addConfigurationKey(this, StandardParametersKey.AuthorizeRemoteTxRequests, 'true')
+    }
+    if (
+      getConfigurationKey(this, StandardParametersKey.LocalAuthListEnabled) == null &&
+      hasFeatureProfile(this, SupportedFeatureProfiles.LocalAuthListManagement)
+    ) {
+      addConfigurationKey(this, StandardParametersKey.LocalAuthListEnabled, 'false')
+    }
+    if (getConfigurationKey(this, StandardParametersKey.ConnectionTimeOut) == null) {
+      addConfigurationKey(
+        this,
+        StandardParametersKey.ConnectionTimeOut,
+        Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS.toString()
+      )
+    }
+    this.saveOcppConfiguration()
+  }
+
+  private initializeOcppServices (): void {
+    const ocppVersion = this.stationInfo?.ocppVersion
+    if (ocppVersion == null) {
+      this.handleUnsupportedVersion(ocppVersion)
+      return
+    }
+    try {
+      const services = createOCPPServices(ocppVersion)
+      this.ocppIncomingRequestService = services.incomingRequestService
+      this.ocppRequestService = services.requestService
+    } catch (error) {
+      if (error instanceof OCPPError && error.code === ErrorType.INTERNAL_ERROR) {
+        this.handleUnsupportedVersion(ocppVersion)
+      }
+      throw error
+    }
+  }
+
+  private internalStopMessageSequence (): void {
+    this.stopWebSocketPing()
+    this.stopHeartbeat()
+    if (this.automaticTransactionGenerator?.started === true) {
+      this.stopAutomaticTransactionGenerator()
+    }
+  }
+
+  private onClose (wsConnection: WebSocket, code: number, reason: Buffer): void {
+    const closedByRequest = this.wsConnectionsClosedByRequest.delete(wsConnection)
+    if (wsConnection !== this.wsConnection) {
+      return
+    }
+    this.wsConnection = null
+    this.restoreAcknowledgedBufferedMessages()
+    this.ocppRequestService.cancelPendingRequests(
+      this,
+      'WebSocket closed while awaiting an OCPP response',
+      false,
+      { bufferInFlightSends: true, preserveRetainableWaiters: true }
+    )
+    this.emitChargingStationEvent(ChargingStationEvents.disconnected)
+    this.emitChargingStationEvent(ChargingStationEvents.updated)
+    if (ChargingStation.normalWebSocketCloseEventStatusCodes.has(code)) {
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.onClose: WebSocket normally closed with status '${getWebSocketCloseEventStatusString(code)}' and reason '${reason.toString()}'`
+      )
+    } else {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.onClose: WebSocket abnormally closed with status '${getWebSocketCloseEventStatusString(code)}' and reason '${reason.toString()}'`
+      )
+    }
+    // Reconnect on any close we did not request while still started: a
+    // server-initiated drop, or an internal close wanting a fresh connection
+    // (e.g. certificate rotation), clean or abnormal. A requested close or
+    // an in-progress shutdown stays terminal.
+    if (this.started && !this.stopping && !closedByRequest) {
+      this.reconnect()
+        .then(() => {
+          this.emitChargingStationEvent(ChargingStationEvents.updated)
+          return undefined
+        })
+        .catch((error: unknown) =>
+          logger.error(
+            `${this.logPrefix()} ${moduleName}.onClose: Error while reconnecting:`,
+            error
+          )
+        )
+    } else {
+      this.wsConnectionRetryCount = 0
+    }
+  }
+
+  private onError (wsConnection: WebSocket, error: WSError): void {
+    if (wsConnection === this.wsConnection) {
+      logger.error(`${this.logPrefix()} ${moduleName}.onError: WebSocket error:`, error)
+    }
+  }
+
+  private async onMessage (
+    data: RawData,
+    sourceConnection: undefined | WebSocket = this.wsConnection ?? undefined
+  ): Promise<void> {
+    if (sourceConnection !== this.wsConnection || !this.started) return
+    const messageLifecycleSignal = this.lifecycleAbortSignal
+    const messageSourceIsCurrent = (): boolean => sourceConnection === this.wsConnection
+    const messageLifecycleIsCurrent = (): boolean =>
+      this.lifecycleAbortSignal === messageLifecycleSignal && !messageLifecycleSignal.aborted
+    let request: ErrorResponse | IncomingRequest | Response | undefined
+    let messageType: MessageType | undefined
+    let errorMsg: string
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      request = JSON.parse(data.toString()) as ErrorResponse | IncomingRequest | Response
+      if (Array.isArray(request)) {
+        const [parsedMessageType] = request
+        if (
+          this.isStopping() &&
+          parsedMessageType !== MessageType.CALL_RESULT_MESSAGE &&
+          parsedMessageType !== MessageType.CALL_ERROR_MESSAGE
+        ) {
+          return
+        }
+        switch (parsedMessageType) {
+          // Error Message
+          case MessageType.CALL_ERROR_MESSAGE:
+            messageType = MessageType.CALL_ERROR_MESSAGE
+            this.handleErrorMessage(request)
+            break
+          // Incoming Message
+          case MessageType.CALL_MESSAGE: {
+            messageType = MessageType.CALL_MESSAGE
+            if (!messageLifecycleIsCurrent()) return
+            const commandName = getEnumStringValue(IncomingRequestCommand, request[2])
+            if (commandName == null) {
+              throw new OCPPError(
+                ErrorType.NOT_IMPLEMENTED,
+                `Unknown OCPP command '${request[2]}'`,
+                OCPPConstants.UNKNOWN_OCPP_COMMAND,
+                { command: request[2] }
+              )
+            }
+            await this.handleIncomingMessage(
+              [parsedMessageType, request[1], commandName, request[3]],
+              messageLifecycleSignal,
+              messageLifecycleIsCurrent,
+              messageSourceIsCurrent
+            )
+            break
+          }
+          // Response Message
+          case MessageType.CALL_RESULT_MESSAGE:
+            messageType = MessageType.CALL_RESULT_MESSAGE
+            this.handleResponseMessage(request)
+            break
+          // Unknown Message
+          default:
+            errorMsg = `Wrong message type ${String(parsedMessageType)}`
+            logger.error(`${this.logPrefix()} ${moduleName}.onMessage: ${errorMsg}`)
+            throw new OCPPError(
+              this.stationInfo?.ocppVersion !== OCPPVersion.VERSION_16
+                ? ErrorType.MESSAGE_TYPE_NOT_SUPPORTED
+                : ErrorType.PROTOCOL_ERROR,
+              errorMsg
+            )
+        }
+      } else {
+        throw new OCPPError(
+          ErrorType.PROTOCOL_ERROR,
+          'Incoming message is not an array',
+          undefined,
+          {
+            request,
+          }
+        )
+      }
+    } catch (error) {
+      if (this.isStopping()) return
+      if (!Array.isArray(request)) {
+        if (!messageLifecycleIsCurrent() || !messageSourceIsCurrent()) return
+        const e = ensureError(error)
+        logger.error(
+          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+          `${this.logPrefix()} ${moduleName}.onMessage: Incoming message '${request}' parsing error:`,
+          e
+        )
+        // OCPP 2.0.1 §4.2.3: respond with CALLERROR using messageId "-1"
+        if (this.stationInfo?.ocppVersion !== OCPPVersion.VERSION_16) {
+          await this.ocppRequestService
+            .sendError(
+              this,
+              '-1',
+              new OCPPError(
+                ErrorType.RPC_FRAMEWORK_ERROR,
+                'Incoming message is not a valid JSON or not an array',
+                undefined,
+                // eslint-disable-next-line @typescript-eslint/no-base-to-string
+                { rawMessage: typeof data === 'string' ? data : data.toString() }
+              ),
+              OCPPConstants.UNKNOWN_OCPP_COMMAND
+            )
+            .catch((sendError: unknown) => {
+              logger.error(
+                `${this.logPrefix()} ${moduleName}.onMessage: Error sending RpcFrameworkError CALLERROR:`,
+                sendError
+              )
+            })
+        }
+        return
+      }
+      let commandName: string | undefined
+      let requestCommandName: string | undefined
+      let errorCallback: ErrorCallback
+      const [, messageId] = request
+      const ocppError =
+        error instanceof OCPPError
+          ? error
+          : new OCPPError(ErrorType.INTERNAL_ERROR, getErrorMessage(error))
+      switch (messageType) {
+        case MessageType.CALL_ERROR_MESSAGE:
+        case MessageType.CALL_RESULT_MESSAGE:
+          if (this.requests.has(messageId)) {
+            const cachedRequest = this.getCachedRequest(messageType, messageId)
+            if (cachedRequest != null) {
+              ;[, errorCallback, requestCommandName] = cachedRequest
+              // Reject the deferred promise in case of error at response handling (rejecting an already fulfilled promise is a no-op)
+              errorCallback(ocppError, false)
+            }
+          } else {
+            this.requests.delete(messageId)
+          }
+          break
+        case MessageType.CALL_MESSAGE: {
+          if (!messageLifecycleIsCurrent() || !messageSourceIsCurrent()) return
+          const [, , rawCommandName] = request
+          commandName = typeof rawCommandName === 'string' ? rawCommandName : undefined
+          await this.ocppRequestService.sendError(this, messageId, ocppError, ocppError.command)
+          break
+        }
+      }
+      if (!(error instanceof OCPPError)) {
+        logger.warn(
+          `${this.logPrefix()} ${moduleName}.onMessage: Error thrown at incoming OCPP command ${
+            commandName ?? requestCommandName ?? OCPPConstants.UNKNOWN_OCPP_COMMAND
+            // eslint-disable-next-line @typescript-eslint/no-base-to-string
+          } message '${data.toString()}' handling is not an OCPPError:`,
+          error
+        )
+      }
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.onMessage: Incoming OCPP command '${
+          commandName ?? requestCommandName ?? OCPPConstants.UNKNOWN_OCPP_COMMAND
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        }' message '${data.toString()}'${
+          this.requests.has(messageId)
+            ? ` matching cached request '${JSON.stringify(
+                this.getCachedRequest(messageType, messageId)
+              )}'`
+            : ''
+        } processing error:`,
+        error
+      )
+    }
+  }
+
+  private async onOpen (): Promise<void> {
+    if (this.isWebSocketConnectionOpened()) {
+      this.emitChargingStationEvent(ChargingStationEvents.connected)
+      this.emitChargingStationEvent(ChargingStationEvents.updated)
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.onOpen: Connection to OCPP server through ${
+          this.wsConnectionUrl.href
+        } succeeded`
+      )
+      let registrationRetryCount = 0
+      const wasAcceptedAtOpen = this.inAcceptedState()
+      if (isNotEmptyArray(this.messageQueue)) this.setIntervalFlushMessageBuffer()
+      this.flushMessageBuffer()
+      if (!wasAcceptedAtOpen) {
+        do {
+          await this.ocppRequestService.requestHandler<
+            BootNotificationRequest,
+            BootNotificationResponse
+          >(this, RequestCommand.BOOT_NOTIFICATION, this.bootNotificationRequest, {
+            skipBufferingOnError: true,
+          })
+          if (this.bootNotificationResponse != null) {
+            this.bootNotificationResponse.currentTime =
+              convertToDate(this.bootNotificationResponse.currentTime) ?? new Date()
+          }
+          if (!this.inAcceptedState()) {
+            ++registrationRetryCount
+            await sleep(
+              computeExponentialBackOffDelay({
+                baseDelayMs:
+                  this.bootNotificationResponse?.interval != null
+                    ? secondsToMilliseconds(this.bootNotificationResponse.interval)
+                    : Constants.DEFAULT_BOOT_NOTIFICATION_INTERVAL_MS,
+                jitterMs: Constants.DEFAULT_WS_RECONNECT_TIMEOUT_OFFSET_MS,
+                retryNumber: registrationRetryCount,
+              })
+            )
+          }
+        } while (
+          !this.inAcceptedState() &&
+          (this.stationInfo?.registrationMaxRetries === -1 ||
+            registrationRetryCount <= (this.stationInfo?.registrationMaxRetries ?? 0))
+        )
+      }
+      if (!this.inAcceptedState()) {
+        logger.error(
+          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+          `${this.logPrefix()} ${moduleName}.onOpen: Registration failure: maximum retries reached (${registrationRetryCount.toString()}) or retry disabled (${this.stationInfo?.registrationMaxRetries?.toString()})`
+        )
+      } else if (wasAcceptedAtOpen) {
+        await this.startAlignedMeterValuesAfterReplay()
+      }
+      this.emitChargingStationEvent(ChargingStationEvents.updated)
+    } else {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.onOpen: Connection to OCPP server through ${this.wsConnectionUrl.href} failed`
+      )
+    }
+  }
+
+  private onPing (): void {
+    logger.debug(
+      `${this.logPrefix()} ${moduleName}.onPing: Received a WS ping (rfc6455) from the server`
+    )
+  }
+
+  private onPong (): void {
+    logger.debug(
+      `${this.logPrefix()} ${moduleName}.onPong: Received a WS pong (rfc6455) from the server`
+    )
+  }
+
+  /**
+   * Validates and normalizes a supervision URL with the shared schema.
+   * Validation failures log the Zod error and throw a BaseError identifying the
+   * configuration field and, when available, the station.
+   * @param supervisionUrl - URL to validate and normalize.
+   * @param field - Configuration field or OCPP key used in diagnostics.
+   * @param reportedUrl - Value quoted in errors; defaults to `supervisionUrl`.
+   * @returns Validated, normalized supervision URL.
+   * @throws {BaseError} If the supervision URL fails validation.
+   */
+  private parseSupervisionUrl (
+    supervisionUrl: string,
+    field: string,
+    reportedUrl = supervisionUrl
+  ): URL {
+    const result = SupervisionUrlSchema.safeParse(supervisionUrl)
+    if (!result.success) {
+      const chargingStationId = this.stationInfo?.chargingStationId
+      const errorMsg = `${
+        isNotEmptyString(chargingStationId) ? `${chargingStationId}: ` : ''
+      }Invalid supervision url '${reportedUrl}' configured in '${field}'`
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.parseSupervisionUrl: ${errorMsg}`,
+        result.error
+      )
+      throw new BaseError(errorMsg)
+    }
+    return new URL(result.data)
+  }
+
+  private async performDelete (): Promise<void> {
+    const stopPromise = this.started || this.stopPromise != null ? this.stop() : undefined
+    if (stopPromise != null) {
+      try {
+        await stopPromise
+      } catch (error) {
+        const e = ensureError(error)
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.delete: Error stopping station during delete:`,
+          e
+        )
+      }
+    }
+    if (this.deleteConfigurationRequested) {
+      ChargingStation.prototype.discardPersistence.call(this)
+    }
+    ChargingStation.prototype.releaseTransactionEventQueueSaveDelay.call(this)
+    let persistenceError: Error | undefined
+    if (!this.persistenceDiscarded) {
+      try {
+        await this.persistTransactionEventQueues()
+      } catch (error) {
+        if (!(error instanceof TransactionEventQueuePersistenceDiscardedError)) {
+          persistenceError = ensureError(error)
+        }
+      }
+    }
+    // A failed final checkpoint has already armed a deferred retry. Seal all
+    // persistence before clearing the topology so no continuation can overwrite
+    // the retained configuration with an empty snapshot.
+    ChargingStation.prototype.discardPersistence.call(this)
+    this.ocppRequestService.cancelPendingRequests(
+      this,
+      'Charging station deleted while awaiting an OCPP response',
+      true
+    )
+    AutomaticTransactionGenerator.deleteInstance(this)
+    CoherentMeterValuesManager.deleteInstance(this)
+    PerformanceStatistics.deleteInstance(this.stationInfo?.hashId)
+    OCPPAuthServiceFactory.clearInstance(this)
+    if (this.stationInfo != null) {
+      const idTagsFile = getIdTagsFile(this.stationInfo)
+      if (idTagsFile != null) {
+        this.idTagsCache.deleteIdTags(idTagsFile)
+      } else {
+        logger.warn(
+          `${this.logPrefix()} ${moduleName}.delete: No ID tags file found during deletion`
+        )
+      }
+    } else {
+      logger.warn(
+        `${this.logPrefix()} ${moduleName}.delete: No station info available during deletion`
+      )
+    }
+    this.connectors.clear()
+    this.evses.clear()
+    this.clearMessageBuffer()
+    this.templateFileWatcher?.unref()
+    this.chargingStationWorkerBroadcastChannel.unref()
+    this.emitChargingStationEvent(ChargingStationEvents.deleted)
+    this.removeAllListeners()
+    if (persistenceError != null) throw persistenceError
+  }
+
+  private performDeleteConfiguration (): void {
+    if (!existsSync(this.configurationFile)) return
+    try {
+      rmSync(this.configurationFile, { force: true })
+    } catch (error) {
+      const e = ensureError(error)
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.delete: Failed to delete configuration file ${this.configurationFile}:`,
+        e
+      )
+    }
+  }
+
+  private async performStop (
+    reason?: StopTransactionReason,
+    stopTransactions?: boolean
+  ): Promise<void> {
+    const shutdownDeadline = Date.now() + OCPPConstants.OCPP_WEBSOCKET_TIMEOUT_MS
+    const shutdownLifecycleSignal =
+      this.lifecycleAbortController?.signal ?? this.lifecycleAbortSignal
+    OCPP20ServiceUtils.pauseTransactionMeterValues(this)
+    const runStopMessageSequence = async (): Promise<void> => {
+      try {
+        await this.stopMessageSequence(reason, stopTransactions, shutdownLifecycleSignal)
+      } catch (error: unknown) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.stop: Error while stopping message sequence:`,
+          error
+        )
+      }
+    }
+    let incomingRequestsStopped = false
+    let bufferedMessageCallbacksReleased = false
+    const releaseIncomingRequests = (): void => {
+      if (!incomingRequestsStopped) {
+        this.ocppIncomingRequestService.stop(this)
+        incomingRequestsStopped = true
+      }
+      if (!bufferedMessageCallbacksReleased) {
+        this.releaseAllBufferedMessageCallbacks()
+        bufferedMessageCallbacksReleased = true
+      }
+    }
+    let transportFinalized = false
+    const finalizeTransport = (): void => {
+      if (transportFinalized) return
+      transportFinalized = true
+      releaseIncomingRequests()
+      this.closeWSConnection({ byRequest: true })
+      this.lifecycleAbortController?.abort()
+      OCPP20ServiceUtils.cancelTransactionTerminations(this)
+      this.ocppRequestService.cancelPendingRequests(this, undefined, false, {
+        handleTransportStartedSends: true,
+        preserveRetainableWaiters: false,
+      })
+      for (const { connectorStatus } of this.iterateConnectors()) {
+        resetTransactionEventQueueRuntimeState(connectorStatus)
+      }
+      // Tear down the autonomous clock-aligned timer here too: the stop sequence
+      // may be short-circuited by a persistence error or timeout before reaching
+      // stopMessageSequence, otherwise the timer re-arms indefinitely and keeps
+      // emitting after the station has stopped.
+      this.stopAlignedMeterValues()
+      this.started = false
+    }
+    const shutdownGenerationIsCurrent = (): boolean =>
+      (this.lifecycleAbortController?.signal ?? this.lifecycleAbortSignal) ===
+        shutdownLifecycleSignal && !shutdownLifecycleSignal.aborted
+    let awaitedTransactionEventQueueSave: Promise<TransactionEventQueueSaveOutcome> | undefined
+    const flushTransactionEventQueues = async (): Promise<void> => {
+      ChargingStation.prototype.releaseTransactionEventQueueSaveDelay.call(this)
+      if (this.transactionEventQueueSaveDirty) {
+        const persistence = this.persistTransactionEventQueues()
+        awaitedTransactionEventQueueSave = this.transactionEventQueueSavePromise
+        await persistence
+      } else {
+        awaitedTransactionEventQueueSave = this.transactionEventQueueSavePromise
+        const outcome = await awaitedTransactionEventQueueSave
+        if (outcome?.error != null) throw outcome.error
+      }
+    }
+    const finalizeShutdown = async (): Promise<void> => {
+      // Settle accepted responses before the stop sequence snapshots transactions.
+      releaseIncomingRequests()
+      await OCPP20ServiceUtils.waitForTransactionTerminations(this)
+      await flushTransactionEventQueues()
+      if (!shutdownGenerationIsCurrent()) return
+      await runStopMessageSequence()
+      if (!shutdownGenerationIsCurrent()) return
+      await Promise.all(
+        this.iterateConnectors().map(({ connectorStatus }) =>
+          OCPP20ServiceUtils.waitForTransactionEventDelivery(connectorStatus)
+        )
+      )
+      if (!shutdownGenerationIsCurrent()) return
+      await flushTransactionEventQueues()
+      if (!shutdownGenerationIsCurrent()) return
+      this.saveConfiguration()
+      await this.pendingConfigurationSave
+    }
+    try {
+      await promiseWithTimeout(
+        finalizeShutdown(),
+        Constants.STOP_MESSAGE_SEQUENCE_TIMEOUT_MS,
+        `Timeout ${formatDurationMilliSeconds(Constants.STOP_MESSAGE_SEQUENCE_TIMEOUT_MS)} reached while finalizing shutdown`
+      )
+    } catch (error: unknown) {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.stop: Error while finalizing shutdown:`,
+        error
+      )
+    } finally {
+      OCPP20ServiceUtils.cancelTransactionTerminations(this)
+      const remainingShutdownTime = Math.max(shutdownDeadline - Date.now(), 0)
+      if (
+        remainingShutdownTime > 0 &&
+        shutdownGenerationIsCurrent() &&
+        (this.transactionEventQueueSaveDirty ||
+          (this.transactionEventQueueSavePromise != null &&
+            this.transactionEventQueueSavePromise !== awaitedTransactionEventQueueSave))
+      ) {
+        try {
+          await promiseWithTimeout(
+            flushTransactionEventQueues(),
+            remainingShutdownTime,
+            `Timeout ${formatDurationMilliSeconds(remainingShutdownTime)} reached while persisting the final transaction event queue snapshot`
+          )
+        } catch (error: unknown) {
+          logger.error(
+            `${this.logPrefix()} ${moduleName}.stop: Error while persisting the final transaction event queue snapshot:`,
+            error
+          )
+        }
+      }
+      finalizeTransport()
+      // Seal this lifecycle epoch. Any persistence or delivery continuation that
+      // settles after the absolute finalization deadline observes a stale signal.
+      if (
+        (this.lifecycleAbortController?.signal ?? this.lifecycleAbortSignal) ===
+        shutdownLifecycleSignal
+      ) {
+        this.lifecycleAbortController = new AbortController()
+      }
+    }
+
+    if (this.stationInfo?.enableStatistics === true) {
+      this.performanceStatistics?.stop()
+    }
+    this.templateFileWatcher?.close()
+    delete this.bootNotificationResponse
+    this.sharedLRUCache.deleteChargingStationConfiguration(this.configurationFileHash)
+    this.emitChargingStationEvent(ChargingStationEvents.stopped)
+  }
+
+  private async reconnect (): Promise<void> {
+    const reconnectLifecycleSignal = this.lifecycleAbortSignal
+    if (
+      this.stationInfo?.autoReconnectMaxRetries === -1 ||
+      this.wsConnectionRetryCount < (this.stationInfo?.autoReconnectMaxRetries ?? 0)
+    ) {
+      ++this.wsConnectionRetryCount
+      const reconnectDelay = this.getReconnectDelay()
+      const reconnectTimeout =
+        reconnectDelay - Constants.DEFAULT_WS_RECONNECT_TIMEOUT_OFFSET_MS > 0
+          ? reconnectDelay - Constants.DEFAULT_WS_RECONNECT_TIMEOUT_OFFSET_MS
+          : 0
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.reconnect: WebSocket connection retry in ${formatDurationMilliSeconds(reconnectDelay)}, timeout ${formatDurationMilliSeconds(reconnectTimeout)}`
+      )
+      await interruptibleSleep(reconnectDelay, reconnectLifecycleSignal)
+      if (
+        this.lifecycleAbortSignal !== reconnectLifecycleSignal ||
+        reconnectLifecycleSignal.aborted ||
+        !this.started ||
+        this.stopping
+      ) {
+        return
+      }
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.reconnect: WebSocket connection retry #${this.wsConnectionRetryCount.toString()}`
+      )
+      this.openWSConnection(
+        {
+          handshakeTimeout: reconnectTimeout,
+        },
+        { closeOpened: true }
+      )
+    } else if (this.stationInfo?.autoReconnectMaxRetries !== -1) {
+      logger.error(
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        `${this.logPrefix()} ${moduleName}.reconnect: WebSocket connection retries failure: maximum retries reached (${this.wsConnectionRetryCount.toString()}) or retries disabled (${this.stationInfo?.autoReconnectMaxRetries?.toString()})`
+      )
+    }
+  }
+
+  private rejectTransactionEventQueueSaveWaiters (
+    error: Error,
+    throughVersion?: number,
+    lifecycleSignal?: AbortSignal
+  ): void {
+    const waitersByVersion = (
+      this as unknown as {
+        transactionEventQueueSaveWaiters?: Map<number, Set<TransactionEventQueueSaveWaiter>>
+      }
+    ).transactionEventQueueSaveWaiters
+    if (waitersByVersion == null) return
+    for (const [version, waiters] of waitersByVersion) {
+      if (throughVersion != null && version > throughVersion) continue
+      for (const waiter of waiters) {
+        if (lifecycleSignal != null && waiter.lifecycleSignal !== lifecycleSignal) continue
+        waiters.delete(waiter)
+        waiter.reject(error)
+      }
+      if (isEmpty(waiters)) waitersByVersion.delete(version)
+    }
+  }
+
+  private releaseTransactionEventQueueSaveDelay (): void {
+    if (this.transactionEventQueueSaveDirty) this.transactionEventQueueSaveImmediate = true
+    if (this.transactionEventQueueSaveSetTimeout != null) {
+      clearTimeout(this.transactionEventQueueSaveSetTimeout)
+      delete this.transactionEventQueueSaveSetTimeout
+    }
+    const resolve = this.transactionEventQueueSaveDelayResolve
+    delete this.transactionEventQueueSaveDelayResolve
+    resolve?.()
+  }
+
+  private removeBufferedMessageEntry (
+    messageIndex: number,
+    notifyDiscarded: boolean
+  ): BufferedMessageCallbacks | undefined {
+    const [message] = this.messageQueue.splice(messageIndex, 1)
+    const entry = this.bufferedMessageEntries.splice(messageIndex, 1)[0] ?? {}
+    const { callbacks, reservation } = entry
+    this.releaseBufferedMessageCallbacks(reservation)
+    if (this.bufferedMessageInFlight?.entry === entry) {
+      this.bufferedMessageInFlight.retracted = true
+    }
+    this.acknowledgedBufferedMessages.delete(message)
+    if (notifyDiscarded) {
+      try {
+        callbacks?.onDiscarded?.()
+      } catch (error: unknown) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.removeBufferedMessage: Buffered message discard callback failed:`,
+          error
+        )
+      }
+    }
+    if (isEmpty(this.messageQueue)) {
+      ChargingStation.prototype.clearIntervalFlushMessageBuffer.call(this)
+    }
+    return callbacks
+  }
+
+  private resolveTransactionEventQueueSaveWaiters (throughVersion: number): void {
+    const waitersByVersion = (
+      this as unknown as {
+        transactionEventQueueSaveWaiters?: Map<number, Set<TransactionEventQueueSaveWaiter>>
+      }
+    ).transactionEventQueueSaveWaiters
+    if (waitersByVersion == null) return
+    for (const [version, waiters] of waitersByVersion) {
+      if (version > throughVersion) continue
+      waitersByVersion.delete(version)
+      for (const waiter of waiters) waiter.resolve(undefined)
+    }
+  }
+
+  private restoreAcknowledgedBufferedMessages (): void {
+    if (isEmpty(this.acknowledgedBufferedMessages)) return
+    for (const message of this.acknowledgedBufferedMessages) {
+      try {
+        const [, messageId] = JSON.parse(message) as OutgoingRequest
+        this.requests.get(messageId)?.[6]?.()
+      } catch {
+        // Invalid buffered frames are discarded by sendMessageBuffer after reconnect.
+      }
+    }
+    const acknowledgedMessages = [...this.acknowledgedBufferedMessages.values()]
+    this.messageQueue.unshift(...acknowledgedMessages)
+    this.bufferedMessageEntries.unshift(
+      ...acknowledgedMessages.map((): BufferedMessageEntry => ({}))
+    )
+    this.acknowledgedBufferedMessages.clear()
+    this.setIntervalFlushMessageBuffer()
+  }
+
+  private saveAutomaticTransactionGeneratorConfiguration (): void {
+    if (this.stationInfo?.automaticTransactionGeneratorPersistentConfiguration === true) {
+      this.saveConfiguration()
+    }
+  }
+
+  private saveConfiguration (onError?: (error: Error) => void): void {
+    const lifecycleSignal = this.lifecycleAbortSignal
+    if (this.persistenceDiscarded) {
+      const error = new BaseError('Configuration persistence was discarded by station deletion')
+      logger.warn(`${this.logPrefix()} ${moduleName}.saveConfiguration: ${error.message}`)
+      onError?.(error)
+      return
+    }
+    if (isNotEmptyString(this.configurationFile)) {
+      try {
+        if (!existsSync(dirname(this.configurationFile))) {
+          mkdirSync(dirname(this.configurationFile), { recursive: true })
+        }
+        const configurationFromFile = this.getConfigurationFromFile()
+        let configurationData: ChargingStationConfiguration =
+          configurationFromFile != null ? clone(configurationFromFile) : {}
+        if (this.stationInfo?.stationInfoPersistentConfiguration === true) {
+          configurationData.stationInfo = this.stationInfo
+        } else {
+          delete configurationData.stationInfo
+        }
+        if (
+          this.stationInfo?.ocppPersistentConfiguration === true &&
+          Array.isArray(this.ocppConfiguration?.configurationKey)
+        ) {
+          configurationData.configurationKey = this.ocppConfiguration.configurationKey
+        } else {
+          delete configurationData.configurationKey
+        }
+        configurationData = mergeDeepRight(
+          configurationData,
+          buildChargingStationAutomaticTransactionGeneratorConfiguration(
+            this
+          ) as Partial<ChargingStationConfiguration>
+        )
+        if (this.stationInfo?.automaticTransactionGeneratorPersistentConfiguration !== true) {
+          delete configurationData.automaticTransactionGenerator
+        }
+        if (!isEmpty(this.connectors)) {
+          configurationData.connectorsStatus = buildConnectorsStatus(this)
+        } else {
+          delete configurationData.connectorsStatus
+        }
+        if (!isEmpty(this.evses)) {
+          configurationData.evsesStatus = buildEvsesStatus(this)
+        } else {
+          delete configurationData.evsesStatus
+        }
+        // Freeze one coherent persistence snapshot before hashing and before
+        // waiting for the shared configuration-file lock.
+        configurationData = clone(configurationData)
+        delete configurationData.configurationHash
+        const configurationHash = hash(
+          Constants.DEFAULT_HASH_ALGORITHM,
+          JSON.stringify({
+            automaticTransactionGenerator: configurationData.automaticTransactionGenerator,
+            configurationKey: configurationData.configurationKey,
+            stationInfo: configurationData.stationInfo,
+            ...(!isEmpty(this.connectors) && {
+              connectorsStatus: configurationData.connectorsStatus,
+            }),
+            ...(!isEmpty(this.evses) && {
+              evsesStatus: configurationData.evsesStatus,
+            }),
+          } satisfies ChargingStationConfiguration),
+          'hex'
+        )
+        const pendingSaveRequest = this.pendingConfigurationSaveRequest
+        if (
+          (pendingSaveRequest == null && this.configurationFileHash !== configurationHash) ||
+          (pendingSaveRequest != null &&
+            (pendingSaveRequest.configurationHash !== configurationHash ||
+              pendingSaveRequest.lifecycleSignal !== lifecycleSignal))
+        ) {
+          const saveRequest: ConfigurationSaveRequest = {
+            configurationHash,
+            lifecycleSignal,
+            onErrorCallbacks: onError == null ? [] : [onError],
+          }
+          this.pendingConfigurationSaveRequest = saveRequest
+          this.pendingConfigurationSave = AsyncLock.runExclusive(
+            AsyncLockType.configuration,
+            () => {
+              if (this.lifecycleAbortSignal !== lifecycleSignal) {
+                throw new BaseError('Configuration persistence lifecycle generation was superseded')
+              }
+              if (this.persistenceDiscarded) {
+                throw new BaseError('Configuration persistence was discarded by station deletion')
+              }
+              configurationData.configurationHash = configurationHash
+              const measureId = `${FileType.ChargingStationConfiguration} write`
+              const beginId = PerformanceStatistics.beginMeasure(measureId)
+              atomicWriteFileSync(
+                this.configurationFile,
+                JSONStringify(configurationData, 2, MapStringifyFormat.object),
+                FileType.ChargingStationConfiguration,
+                this.logPrefix()
+              )
+              PerformanceStatistics.endMeasure(measureId, beginId)
+              this.sharedLRUCache.deleteChargingStationConfiguration(this.configurationFileHash)
+              this.sharedLRUCache.setChargingStationConfiguration(configurationData)
+              this.configurationFileHash = configurationHash
+            }
+          )
+            .catch((error: unknown) => {
+              // File-system failures are already logged at error level by the atomic
+              // write via handleFileException; absorb them here at debug level. Other
+              // failures inside the lock body (JSON serialization, cache mutation, ...)
+              // would otherwise go unobserved, so log them at error level.
+              const saveError = ensureError(error)
+              const isErrnoException =
+                'code' in saveError && typeof (saveError as NodeJS.ErrnoException).code === 'string'
+              if (isErrnoException) {
+                logger.debug(
+                  `${this.logPrefix()} ${moduleName}.saveConfiguration: configuration save rejected:`,
+                  saveError
+                )
+              } else {
+                logger.error(
+                  `${this.logPrefix()} ${moduleName}.saveConfiguration: unexpected error inside configuration save lock:`,
+                  saveError
+                )
+              }
+              for (const errorCallback of saveRequest.onErrorCallbacks) {
+                errorCallback(saveError)
+              }
+            })
+            .finally(() => {
+              if (this.pendingConfigurationSaveRequest === saveRequest) {
+                delete this.pendingConfigurationSaveRequest
+              }
+            })
+        } else if (pendingSaveRequest != null) {
+          if (onError != null) pendingSaveRequest.onErrorCallbacks.push(onError)
+          logger.debug(
+            `${this.logPrefix()} ${moduleName}.saveConfiguration: Coalescing unchanged pending charging station configuration file ${
+              this.configurationFile
+            }`
+          )
+        } else {
+          logger.debug(
+            `${this.logPrefix()} ${moduleName}.saveConfiguration: Not saving unchanged charging station configuration file ${
+              this.configurationFile
+            }`
+          )
+        }
+      } catch (error) {
+        const saveError = ensureError(error)
+        handleFileException(
+          this.configurationFile,
+          FileType.ChargingStationConfiguration,
+          saveError,
+          this.logPrefix()
+        )
+        onError?.(saveError)
+      }
+    } else {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.saveConfiguration: Trying to save charging station configuration to undefined configuration file`
+      )
+    }
+  }
+
+  private saveConnectorsStatus (): void {
+    this.saveConfiguration()
+  }
+
+  private saveEvsesStatus (): void {
+    this.saveConfiguration()
+  }
+
+  private saveStationInfo (): void {
+    if (this.stationInfo?.stationInfoPersistentConfiguration === true) {
+      this.saveConfiguration()
+    }
+  }
+
+  private sendMessageBuffer (onCompleteCallback: () => void, messageIdx?: number): void {
+    if (this.bufferedMessageEntries.length < this.messageQueue.length) {
+      this.bufferedMessageEntries.push(
+        ...Array.from(
+          { length: this.messageQueue.length - this.bufferedMessageEntries.length },
+          (): BufferedMessageEntry => ({})
+        )
+      )
+    }
+    if (this.isStopping() || !this.isWebSocketConnectionOpened()) {
+      onCompleteCallback()
+      return
+    }
+    const replayLifecycleSignal = this.lifecycleAbortController?.signal
+    if (isNotEmptyArray<string>(this.messageQueue)) {
+      const responseMessageIndex = this.messageQueue.findIndex(bufferedMessage => {
+        try {
+          const [messageType] = JSON.parse(bufferedMessage) as
+            ErrorResponse | OutgoingRequest | Response
+          return messageType !== MessageType.CALL_MESSAGE
+        } catch {
+          return true
+        }
+      })
+      const messageIndex =
+        responseMessageIndex >= 0 ? responseMessageIndex : this.inAcceptedState() ? 0 : -1
+      if (messageIndex < 0) {
+        onCompleteCallback()
+        return
+      }
+      const message = this.messageQueue[messageIndex]
+      const entry = this.bufferedMessageEntries[messageIndex] ?? {}
+      this.bufferedMessageEntries[messageIndex] = entry
+      let commandName: RequestCommand | undefined
+      let messageId: string | undefined
+      let parsedMessage: ErrorResponse | OutgoingRequest | Response
+      messageIdx ??= 0
+      try {
+        const parsedBufferedMessage: unknown = JSON.parse(message)
+        if (!Array.isArray(parsedBufferedMessage)) {
+          throw new TypeError('Buffered OCPP message is not an array')
+        }
+        parsedMessage = parsedBufferedMessage as ErrorResponse | OutgoingRequest | Response
+      } catch (error) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.sendMessageBuffer: Error while parsing buffered OCPP message '${message}' to JSON:`,
+          error
+        )
+        ChargingStation.prototype.removeBufferedMessageEntry.call(this, messageIndex, true)
+        this.sendMessageBuffer(onCompleteCallback, messageIdx)
+        return
+      }
+      const [messageType] = parsedMessage
+      const isRequest = messageType === MessageType.CALL_MESSAGE
+      if (isRequest && !this.inAcceptedState()) {
+        onCompleteCallback()
+        return
+      }
+      if (parsedMessage[0] === MessageType.CALL_MESSAGE) {
+        ;[, messageId, commandName] = parsedMessage
+      }
+      const bufferedMessageInFlight: {
+        entry: BufferedMessageEntry
+        isRequest: boolean
+        message: string
+        messageId?: string
+        retracted: boolean
+        stopDrain?: boolean
+        waitingForCallGate: boolean
+      } = {
+        entry,
+        isRequest,
+        message,
+        ...(messageId != null && { messageId }),
+        retracted: false,
+        waitingForCallGate: isRequest,
+      }
+      this.bufferedMessageInFlight = bufferedMessageInFlight
+      const replayConnection = this.wsConnection
+      if (replayConnection == null) {
+        delete this.bufferedMessageInFlight
+        onCompleteCallback()
+        return
+      }
+      const sendBufferedMessage = (): void => {
+        const messageToSend = bufferedMessageInFlight.message
+        const beginId =
+          isRequest && commandName != null
+            ? PerformanceStatistics.beginMeasure(commandName)
+            : undefined
+        let settled = false
+        const settleBufferedSend = (error?: Error): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(sendTimeout)
+          if (isRequest && commandName != null && beginId != null) {
+            PerformanceStatistics.endMeasure(commandName, beginId)
+          }
+          if (
+            isRequest &&
+            messageId != null &&
+            (error != null ||
+              bufferedMessageInFlight.retracted ||
+              replayConnection !== this.wsConnection ||
+              !this.requests.has(messageId))
+          ) {
+            this.ocppRequestService.releaseOutgoingCall(this, messageId)
+          }
+          if (this.bufferedMessageInFlight === bufferedMessageInFlight) {
+            delete this.bufferedMessageInFlight
+          }
+          if (error == null) {
+            if (!bufferedMessageInFlight.retracted && replayConnection === this.wsConnection) {
+              if (isRequest && messageId != null) {
+                try {
+                  this.requests.get(messageId)?.[5]?.()
+                } catch (error: unknown) {
+                  logger.error(
+                    `${this.logPrefix()} ${moduleName}.sendMessageBuffer: onMessageSent callback failed for buffered message id '${messageId}':`,
+                    error
+                  )
+                }
+              }
+              logger.debug(
+                `${this.logPrefix()} ${moduleName}.sendMessageBuffer: >> Buffered ${getMessageTypeString(messageType)} OCPP message sent '${messageToSend}'`
+              )
+              const currentMessageIndex = this.bufferedMessageEntries.indexOf(entry)
+              const callbacks =
+                currentMessageIndex >= 0
+                  ? ChargingStation.prototype.removeBufferedMessageEntry.call(
+                    this,
+                    currentMessageIndex,
+                    false
+                  )
+                  : undefined
+              if (isRequest) this.acknowledgedBufferedMessages.add(messageToSend)
+              try {
+                callbacks?.onSent?.()
+              } catch (error: unknown) {
+                logger.error(
+                  `${this.logPrefix()} ${moduleName}.sendMessageBuffer: Buffered message sent callback failed:`,
+                  error
+                )
+              }
+            }
+          } else {
+            logger.error(
+              `${this.logPrefix()} ${moduleName}.sendMessageBuffer: Error while sending buffered ${getMessageTypeString(messageType)} OCPP message '${messageToSend}':`,
+              error
+            )
+          }
+          if (bufferedMessageInFlight.stopDrain === true) {
+            onCompleteCallback()
+            this.flushMessageBuffer()
+            return
+          }
+          // eslint-disable-next-line promise/no-promise-in-callback -- exponential-backoff sleep inside a WebSocket callback; failures on the outer send are surfaced separately
+          sleep(
+            computeExponentialBackOffDelay({
+              baseDelayMs: Constants.DEFAULT_EXPONENTIAL_BACKOFF_BASE_DELAY_MS,
+              jitterPercent: Constants.DEFAULT_RECONNECT_JITTER_PERCENT,
+              retryNumber: messageIdx ?? 0,
+            })
+          )
+            .then(() => {
+              if (replayLifecycleSignal?.aborted === true) {
+                onCompleteCallback()
+                this.flushMessageBuffer()
+                return undefined
+              }
+              if (messageIdx != null) {
+                ++messageIdx
+              }
+              this.sendMessageBuffer(onCompleteCallback, messageIdx)
+              return undefined
+            })
+            .catch((error: unknown) => {
+              throw error
+            })
+        }
+        const sendTimeout = setTimeout(() => {
+          settleBufferedSend(
+            new OCPPError(
+              ErrorType.GENERIC_ERROR,
+              `Timeout ${formatDurationMilliSeconds(OCPPConstants.OCPP_WEBSOCKET_TIMEOUT_MS)} sending buffered ${getMessageTypeString(messageType)} OCPP message '${messageToSend}'`
+            )
+          )
+        }, OCPPConstants.OCPP_WEBSOCKET_TIMEOUT_MS)
+        try {
+          replayConnection.send(messageToSend, settleBufferedSend)
+        } catch (error: unknown) {
+          settleBufferedSend(ensureError(error))
+        }
+      }
+      if (isRequest && messageId != null) {
+        const cachedResponseTimeoutMs = this.requests.get(messageId)?.[7] ?? 0
+        const replaySlotTimeoutMs = clampToSafeTimerValue(
+          clampToSafeTimerValue(OCPPConstants.OCPP_WEBSOCKET_TIMEOUT_MS) +
+            clampToSafeTimerValue(cachedResponseTimeoutMs)
+        )
+        this.ocppRequestService
+          .acquireOutgoingCall(this, messageId, replaySlotTimeoutMs, () => true)
+          .then(() => {
+            bufferedMessageInFlight.waitingForCallGate = false
+            if (
+              this.isStopping() ||
+              !this.inAcceptedState() ||
+              bufferedMessageInFlight.retracted ||
+              replayConnection !== this.wsConnection
+            ) {
+              this.ocppRequestService.releaseOutgoingCall(this, messageId)
+              if (this.bufferedMessageInFlight === bufferedMessageInFlight) {
+                delete this.bufferedMessageInFlight
+              }
+              onCompleteCallback()
+              this.flushMessageBuffer()
+              return undefined
+            }
+            sendBufferedMessage()
+            return undefined
+          })
+          .catch(() => {
+            if (this.bufferedMessageInFlight === bufferedMessageInFlight) {
+              delete this.bufferedMessageInFlight
+            }
+            onCompleteCallback()
+            if (
+              !this.isStopping() &&
+              this.isWebSocketConnectionOpened() &&
+              isNotEmptyArray(this.messageQueue)
+            ) {
+              const hasBufferedResponse = this.messageQueue.some(bufferedMessage => {
+                try {
+                  const [bufferedMessageType] = JSON.parse(bufferedMessage) as
+                    ErrorResponse | OutgoingRequest | Response
+                  return bufferedMessageType !== MessageType.CALL_MESSAGE
+                } catch {
+                  return true
+                }
+              })
+              if (hasBufferedResponse) this.flushMessageBuffer()
+              else this.setIntervalFlushMessageBuffer()
+            }
+          })
+      } else {
+        sendBufferedMessage()
+      }
+    } else {
+      onCompleteCallback()
+    }
+  }
+
+  private setIntervalFlushMessageBuffer (): void {
+    this.flushMessageBufferSetInterval ??= setInterval(() => {
+      if (this.isWebSocketConnectionOpened()) {
+        this.flushMessageBuffer()
+      }
+      if (!this.isWebSocketConnectionOpened() || isEmpty(this.messageQueue)) {
+        this.clearIntervalFlushMessageBuffer()
+      }
+    }, Constants.DEFAULT_MESSAGE_BUFFER_FLUSH_INTERVAL_MS)
+  }
+
+  private async startAcceptedMessageSequence (ATGStopAbsoluteDuration?: boolean): Promise<void> {
+    this.acceptedMessageSequenceStartup ??= (async () => {
+      try {
+        await this.startMessageSequence(ATGStopAbsoluteDuration)
+      } catch (error) {
+        logger.error(
+          `${this.logPrefix()} ${moduleName}.startAcceptedMessageSequence: Error while starting the message sequence:`,
+          error
+        )
+      }
+      if (
+        this.started &&
+        !this.stopping &&
+        this.isWebSocketConnectionOpened() &&
+        this.inAcceptedState()
+      ) {
+        await this.startAlignedMeterValuesAfterReplay()
+      }
+    })()
+    const startup = this.acceptedMessageSequenceStartup
+    try {
+      await startup
+    } finally {
+      if (this.acceptedMessageSequenceStartup === startup) {
+        this.acceptedMessageSequenceStartup = undefined
+      }
+    }
+  }
+
+  private async startAlignedMeterValuesAfterReplay (): Promise<void> {
+    this.alignedMeterValuesStartup ??= (async () => {
+      const generation = this.alignedMeterValuesGeneration
+      await flushQueuedTransactionMessages(this)
+      if (
+        generation === this.alignedMeterValuesGeneration &&
+        this.started &&
+        !this.stopping &&
+        this.isWebSocketConnectionOpened() &&
+        this.inAcceptedState()
+      ) {
+        this.startAlignedMeterValues()
+      }
+    })()
+    const startup = this.alignedMeterValuesStartup
+    try {
+      await startup
+    } finally {
+      if (this.alignedMeterValuesStartup === startup) {
+        this.alignedMeterValuesStartup = undefined
+        if (this.alignedMeterValuesRestartPending) {
+          this.alignedMeterValuesRestartPending = false
+          if (
+            this.started &&
+            !this.stopping &&
+            this.isWebSocketConnectionOpened() &&
+            this.inAcceptedState()
+          ) {
+            this.startAlignedMeterValues()
+          }
+        }
+      }
+    }
+  }
+
+  private async startMessageSequence (ATGStopAbsoluteDuration?: boolean): Promise<void> {
+    const responseTimeoutMs = isOCPP20x(this.stationInfo?.ocppVersion)
+      ? OCPP20ServiceUtils.getMessageTimeout(this)
+      : secondsToMilliseconds(Constants.DEFAULT_MESSAGE_TIMEOUT_SECONDS)
+    if (this.stationInfo?.autoRegister === true) {
+      await this.ocppRequestService.requestHandler<
+        BootNotificationRequest,
+        BootNotificationResponse
+      >(this, RequestCommand.BOOT_NOTIFICATION, this.bootNotificationRequest, {
+        responseTimeoutMs,
+        skipBufferingOnError: true,
+      })
+    }
+    if (this.wsPingSetInterval == null) {
+      this.startWebSocketPing()
+    }
+    if (this.heartbeatSetInterval == null) {
+      this.startHeartbeat()
+    }
+    for (const { connectorId, connectorStatus, evseId } of this.iterateConnectors(true)) {
+      await sendAndSetConnectorStatus(
+        this,
+        {
+          connectorId,
+          ...(evseId != null && { evseId }),
+          status: getBootConnectorStatus(this, connectorId, connectorStatus),
+        },
+        { responseTimeoutMs, send: true }
+      )
+    }
+    if (this.stationInfo?.firmwareStatus === FirmwareStatus.Installing) {
+      await this.ocppRequestService.requestHandler<
+        FirmwareStatusNotificationRequest,
+        FirmwareStatusNotificationResponse
+      >(
+        this,
+        RequestCommand.FIRMWARE_STATUS_NOTIFICATION,
+        {
+          status: FirmwareStatus.Installed,
+        },
+        {
+          responseTimeoutMs,
+        }
+      )
+      this.stationInfo.firmwareStatus = FirmwareStatus.Installed
+    }
+
+    if (this.getAutomaticTransactionGeneratorConfiguration()?.enable === true) {
+      this.startAutomaticTransactionGenerator(undefined, ATGStopAbsoluteDuration)
+    }
+    this.flushMessageBuffer()
+  }
+
+  private startTransactionEventQueueSave (deferred: boolean): void {
+    if (!deferred) {
+      ChargingStation.prototype.releaseTransactionEventQueueSaveDelay.call(this)
+    }
+    if (this.transactionEventQueueSavePromise == null) {
+      const owner = {}
+      this.transactionEventQueueSaveOwner = owner
+      this.transactionEventQueueSavePromise =
+        ChargingStation.prototype.drainTransactionEventQueueSaves.call(this, owner)
+    }
+  }
+
+  private startWebSocketPing (): void {
+    const webSocketPingInterval = this.getWebSocketPingInterval()
+    if (webSocketPingInterval > 0 && this.wsPingSetInterval == null) {
+      this.wsPingSetInterval = setInterval(
+        () => {
+          if (this.isWebSocketConnectionOpened()) {
+            this.wsConnection?.ping()
+          }
+        },
+        clampToSafeTimerValue(secondsToMilliseconds(webSocketPingInterval))
+      )
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.startWebSocketPing: WebSocket ping started every ${formatDurationSeconds(
+          webSocketPingInterval
+        )}`
+      )
+    } else if (this.wsPingSetInterval != null) {
+      logger.info(
+        `${this.logPrefix()} ${moduleName}.startWebSocketPing: WebSocket ping already started every ${formatDurationSeconds(
+          webSocketPingInterval
+        )}`
+      )
+    } else {
+      logger.error(
+        `${this.logPrefix()} ${moduleName}.startWebSocketPing: WebSocket ping interval set to ${webSocketPingInterval.toString()}, not starting the WebSocket ping`
+      )
+    }
+  }
+
+  private stopHeartbeat (): void {
+    if (this.heartbeatSetInterval != null) {
+      clearInterval(this.heartbeatSetInterval)
+      delete this.heartbeatSetInterval
+    }
+  }
+
+  private async stopMessageSequence (
+    reason?: StopTransactionReason,
+    stopTransactions?: boolean,
+    lifecycleAbortSignal = this.lifecycleAbortSignal
+  ): Promise<void> {
+    const generationIsCurrent = (): boolean =>
+      this.lifecycleAbortSignal === lifecycleAbortSignal && !lifecycleAbortSignal.aborted
+    if (!generationIsCurrent()) return
+    this.internalStopMessageSequence()
+    if (!generationIsCurrent()) return
+    this.stopAlignedMeterValues()
+    if (stopTransactions) {
+      await stopRunningTransactions(this, reason)
+      if (!generationIsCurrent()) return
+    }
+    for (const { connectorId, connectorStatus, evseId } of this.iterateConnectors(true)) {
+      if (!generationIsCurrent()) break
+      await sendAndSetConnectorStatus(
+        this,
+        {
+          connectorId,
+          ...(evseId != null && { evseId }),
+          status: ConnectorStatusEnum.Unavailable,
+        },
+        { lifecycleAbortSignal, send: true }
+      )
+      if (!generationIsCurrent()) break
+      delete connectorStatus.status
+    }
+  }
+
+  private stopWebSocketPing (): void {
+    if (this.wsPingSetInterval != null) {
+      clearInterval(this.wsPingSetInterval)
+      delete this.wsPingSetInterval
+    }
+  }
+
+  private terminateWSConnection (): void {
+    if (this.isWebSocketConnectionOpened()) {
+      this.wsConnection?.terminate()
+    }
+  }
+
+  private async waitForTransactionEventQueueSaveDelay (): Promise<void> {
+    await new Promise<void>(resolve => {
+      this.transactionEventQueueSaveDelayResolve = resolve
+      this.transactionEventQueueSaveSetTimeout = setTimeout(() => {
+        ChargingStation.prototype.releaseTransactionEventQueueSaveDelay.call(this)
+      }, TRANSACTION_EVENT_QUEUE_CHECKPOINT_INTERVAL_MS)
+      this.transactionEventQueueSaveSetTimeout.unref()
+    })
+  }
+}

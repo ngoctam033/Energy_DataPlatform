@@ -1,0 +1,44 @@
+name: autofix.ci
+on:
+  push:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: pipx install poetry
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: 3.15
+          cache: poetry
+
+      - working-directory: tests/ocpp-server
+        run: |
+          poetry install --no-root
+          poetry run task format
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          cache: 'pnpm'
+
+      - run: pnpm install --ignore-scripts
+
+      - run: pnpm format
+
+      - working-directory: ui/common
+        run: pnpm format
+
+      - working-directory: ui/cli
+        run: pnpm format
+
+      - working-directory: ui/web
+        run: pnpm format
+
+      - uses: autofix-ci/action@7a166d7532b277f34e16238930461bf77f9d7ed8

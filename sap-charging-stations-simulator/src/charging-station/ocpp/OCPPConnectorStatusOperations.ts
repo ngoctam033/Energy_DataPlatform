@@ -1,0 +1,205 @@
+import { type ChargingStation } from '../../charging-station/index.js'
+import { OCPPError } from '../../exception/index.js'
+import {
+  AvailabilityType,
+  ChargingStationEvents,
+  type ConnectorStatus,
+  ConnectorStatusEnum,
+  ErrorType,
+  OCPPVersion,
+  RequestCommand,
+  type StatusNotificationOptions,
+  type StatusNotificationResponse,
+} from '../../types/index.js'
+import { logger } from '../../utils/index.js'
+import { OCPP16Constants } from './1.6/OCPP16Constants.js'
+import { OCPP20Constants } from './2.0/OCPP20Constants.js'
+
+/**
+ * Sends a StatusNotification request and updates the connector status locally.
+ * @param chargingStation - Target charging station
+ * @param commandParams - Cross-version StatusNotification input; `connectorStatus` (OCPP 2.0.1) takes precedence over `status` (OCPP 1.6)
+ * @param options - Optional send behavior.
+ * @param options.send - Whether to send the status notification.
+ * @param options.waitForResponse - Whether local completion waits for the CSMS response.
+ * @param options.responseTimeoutMs - Optional CSMS response timeout in milliseconds.
+ * @param options.expectedTransactionId - When set, apply the response locally only while the connector still owns this transaction.
+ * @param options.lifecycleAbortSignal - When set, apply the response only within the captured lifecycle generation.
+ * @param options.isOperationCurrent - When set, apply the response locally only while the owning operation remains current.
+ */
+export const sendAndSetConnectorStatus = async (
+  chargingStation: ChargingStation,
+  commandParams: StatusNotificationOptions,
+  options?: {
+    expectedTransactionId?: number | string
+    isOperationCurrent?: () => boolean
+    lifecycleAbortSignal?: AbortSignal
+    responseTimeoutMs?: number
+    send: boolean
+    waitForResponse?: boolean
+  }
+): Promise<void> => {
+  options = { send: true, ...options }
+  const { connectorId, errorCode, evseId } = commandParams
+  const status = commandParams.connectorStatus ?? commandParams.status
+  const connectorStatus = chargingStation.getConnectorStatus(connectorId, evseId)
+  if (connectorStatus == null) {
+    return
+  }
+  if (options.send) {
+    checkConnectorStatusTransition(chargingStation, connectorId, status, evseId)
+    const response = chargingStation.ocppRequestService.requestHandler<
+      StatusNotificationOptions,
+      StatusNotificationResponse
+    >(chargingStation, RequestCommand.STATUS_NOTIFICATION, commandParams, {
+      responseTimeoutMs: options.responseTimeoutMs,
+    })
+    if (options.waitForResponse === false) {
+      response.catch((error: unknown) => {
+        logger.error(
+          `${chargingStation.logPrefix()} OCPPConnectorStatusOperations.sendAndSetConnectorStatus: Failed to send connector status:`,
+          error
+        )
+      })
+    } else {
+      await response
+    }
+  }
+  const currentConnectorStatus =
+    options.expectedTransactionId != null
+      ? chargingStation.getConnectorStatus(connectorId, evseId)
+      : connectorStatus
+  if (
+    currentConnectorStatus == null ||
+    (options.lifecycleAbortSignal != null &&
+      (options.lifecycleAbortSignal.aborted ||
+        chargingStation.lifecycleAbortSignal !== options.lifecycleAbortSignal)) ||
+    options.isOperationCurrent?.() === false ||
+    (options.expectedTransactionId != null &&
+      currentConnectorStatus.transactionId !== options.expectedTransactionId)
+  ) {
+    return
+  }
+  currentConnectorStatus.status = status
+  currentConnectorStatus.errorCode = errorCode
+  chargingStation.emitChargingStationEvent(ChargingStationEvents.connectorStatusChanged, {
+    connectorId,
+    ...(evseId != null && { evseId }),
+    ...currentConnectorStatus,
+  })
+}
+
+/**
+ * Sends Available or Unavailable connector status after a transaction ends.
+ * Re-evaluates station and connector availability to determine the target status.
+ * @param chargingStation - Target charging station
+ * @param connectorId - Connector ID to transition
+ * @param evseId - Optional EVSE identifier for EVSE-local connector ids
+ * @param options - Optional send behavior.
+ * @param options.waitForResponse - Whether local completion waits for the CSMS response.
+ * @param options.responseTimeoutMs - Optional CSMS response timeout in milliseconds.
+ */
+export const sendPostTransactionStatus = async (
+  chargingStation: ChargingStation,
+  connectorId: number,
+  evseId?: number,
+  options?: { responseTimeoutMs?: number; waitForResponse?: boolean }
+): Promise<void> => {
+  const status =
+    chargingStation.isChargingStationAvailable() &&
+    chargingStation.getConnectorStatus(connectorId, evseId)?.availability ===
+      AvailabilityType.Operative
+      ? ConnectorStatusEnum.Available
+      : ConnectorStatusEnum.Unavailable
+  await sendAndSetConnectorStatus(
+    chargingStation,
+    {
+      connectorId,
+      connectorStatus: status,
+      evseId,
+      status,
+    },
+    { responseTimeoutMs: options?.responseTimeoutMs, send: true, ...options }
+  )
+}
+
+/**
+ * Restores a connector status to Reserved or Available based on its current state.
+ * @param chargingStation - Target charging station
+ * @param connectorId - Connector ID to restore
+ * @param connectorStatus - Current connector status to evaluate
+ * @param evseId - Optional EVSE identifier for EVSE-local connector IDs
+ */
+export const restoreConnectorStatus = async (
+  chargingStation: ChargingStation,
+  connectorId: number,
+  connectorStatus: ConnectorStatus | undefined,
+  evseId?: number
+): Promise<void> => {
+  if (
+    connectorStatus?.reservation != null &&
+    connectorStatus.status !== ConnectorStatusEnum.Reserved
+  ) {
+    await sendAndSetConnectorStatus(chargingStation, {
+      connectorId,
+      ...(evseId != null && { evseId }),
+      status: ConnectorStatusEnum.Reserved,
+    })
+  } else if (connectorStatus?.status !== ConnectorStatusEnum.Available) {
+    await sendAndSetConnectorStatus(chargingStation, {
+      connectorId,
+      ...(evseId != null && { evseId }),
+      status: ConnectorStatusEnum.Available,
+    })
+  }
+}
+
+const checkConnectorStatusTransition = (
+  chargingStation: ChargingStation,
+  connectorId: number,
+  status: ConnectorStatusEnum | undefined,
+  evseId?: number
+): boolean => {
+  const fromStatus = chargingStation.getConnectorStatus(connectorId, evseId)?.status
+  let chargingStationTransitions: readonly {
+    from?: ConnectorStatusEnum
+    to: ConnectorStatusEnum
+  }[]
+  let connectorTransitions: readonly { from?: ConnectorStatusEnum; to: ConnectorStatusEnum }[]
+  switch (chargingStation.stationInfo?.ocppVersion) {
+    case OCPPVersion.VERSION_16:
+      chargingStationTransitions = OCPP16Constants.ChargePointStatusChargingStationTransitions
+      connectorTransitions = OCPP16Constants.ChargePointStatusConnectorTransitions
+      break
+    case OCPPVersion.VERSION_20:
+    case OCPPVersion.VERSION_201:
+      chargingStationTransitions = OCPP20Constants.ChargingStationStatusTransitions
+      connectorTransitions = OCPP20Constants.ConnectorStatusTransitions
+      break
+    default:
+      throw new OCPPError(
+        ErrorType.INTERNAL_ERROR,
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        `Cannot check connector status transition: OCPP version ${chargingStation.stationInfo?.ocppVersion} not supported`,
+        RequestCommand.STATUS_NOTIFICATION
+      )
+  }
+  const transitions = connectorId === 0 ? chargingStationTransitions : connectorTransitions
+  const transitionAllowed = transitions.some(
+    transition => transition.from === fromStatus && transition.to === status
+  )
+  if (!transitionAllowed) {
+    logger.warn(
+      `${chargingStation.logPrefix()} OCPP ${
+        chargingStation.stationInfo.ocppVersion
+      } connector id ${connectorId.toString()} status transition from '${
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        chargingStation.getConnectorStatus(connectorId, evseId)?.status
+      }' to '${
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+        status
+      }' is not allowed`
+    )
+  }
+  return transitionAllowed
+}

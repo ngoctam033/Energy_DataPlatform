@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "abandonments:recommended",
+    ":configMigration",
+    "helpers:pinGitHubActionDigests",
+    ":pinDevDependencies",
+    "group:allNonMajor",
+    "schedule:daily",
+    ":maintainLockFilesWeekly",
+    "security:minimumReleaseAgeNpm",
+    "security:minimumReleaseAgePypi"
+  ],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "addLabels": ["security"]
+  },
+  "ignorePresets": [":ignoreModulesAndTests"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/__fixtures__/**"
+  ],
+  "packageRules": [
+    {
+      "matchFileNames": ["**/package.json"],
+      "matchDepTypes": ["dependencies", "optionalDependencies"],
+      "rangeStrategy": "bump"
+    }
+  ],
+  "postUpdateOptions": ["pnpmDedupe"]
+}

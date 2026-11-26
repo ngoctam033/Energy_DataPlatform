@@ -2,6 +2,8 @@
 # !override requires Docker Compose >= 2.24.4.
 services:
   citrine:
+    environment:
+      CITRINEOS_MESSAGEBROKER_AMQP_URL: "amqp://energy_lab:energy-lab-rabbit-dev@amqp-broker:5672"
     ports: !override
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8081:8081"
@@ -20,6 +22,9 @@ services:
     ports: !override
       - "127.0.0.1:5433:5432"
   amqp-broker:
+    environment:
+      RABBITMQ_DEFAULT_USER: "energy_lab"
+      RABBITMQ_DEFAULT_PASS: "energy-lab-rabbit-dev"
     ports: !override
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
@@ -27,5 +32,7 @@ services:
     ports: !override
       - "127.0.0.1:8090:8080"
   citrineos-ocpi:
+    environment:
+      AMQP_URL: "amqp://energy_lab:energy-lab-rabbit-dev@amqp-broker:5672"
     ports: !override
       - "127.0.0.1:8085:8085"
