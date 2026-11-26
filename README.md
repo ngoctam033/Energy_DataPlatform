@@ -98,6 +98,27 @@ Vai trò dự kiến trong demo:
 
 Công nghệ chính: Odoo 18, Python, PostgreSQL và XML views.
 
+### Các bộ mô phỏng trạm sạc
+
+Workspace hiện có ba bộ mô phỏng phục vụ các mục tiêu kiểm thử khác nhau:
+
+- [`everest-demo`](./everest-demo/README.md): mô phỏng EV/EVSE, luồng sạc, OCPP 2.0.1 và ISO 15118; cấu hình Compose tổng sử dụng EVerest để kết nối với CitrineOS;
+- [`sap-charging-stations-simulator`](./sap-charging-stations-simulator/README.md): sinh nhiều trạm và giao dịch OCPP tự động, phù hợp tạo dữ liệu vận hành liên tục; được bật bằng Compose profile `sap`;
+- [`opencpo-charger-farm`](./opencpo-charger-farm/README.md): mô phỏng tải lớn, reconnect, lỗi mạng, sự cố, V2G và chaos test; được bật bằng Compose profile `opencpo`.
+
+Các simulator là công cụ bổ sung cho nhau, không phải ba thành phần bắt buộc phải chạy đồng thời. Danh sách ứng viên, tiêu chí đánh giá và trạng thái xác minh được ghi tại [`energy_charging_simulator_repositories.md`](./energy_charging_simulator_repositories.md).
+
+### Dịch vụ dữ liệu và quan sát
+
+Stack Compose cấp workspace hiện khai báo:
+
+- PostgreSQL/PostGIS, RabbitMQ và Hasura từ Compose của CitrineOS;
+- InfluxDB để lưu dữ liệu chuỗi thời gian của OpenEMS;
+- Grafana để xây dựng dashboard và quan sát dữ liệu;
+- OpenEMS Edge, Backend, UI Edge và UI Backend.
+
+Workspace cũng đang chứa source của `docker-postgis`, `graphql-engine`, `influxdb`, `rabbitmq-server` và `grafana` để nghiên cứu hoặc phát triển riêng. Việc source có mặt trong workspace không đồng nghĩa Compose tổng đang build các dịch vụ đó từ source local; cần kiểm tra [`docker-compose.yml`](./docker-compose.yml) và Compose của CitrineOS để biết image hoặc build context thực tế.
+
 ## Liên hệ với công việc Điều độ Năng lượng
 
 | Nhóm công việc | Nội dung thực hành trong project | Thành phần chính |
@@ -179,13 +200,37 @@ Một kịch bản hoàn chỉnh có thể gồm các bước:
 
 ```text
 Energy_DataPlatform/
-├── citrineos-core/   # CSMS và OCPP
-├── openems/          # EMS, Edge, Backend và UI
-├── odoo-openems/     # Addon Odoo Metadata Provider
-└── README.md         # Giới thiệu và định hướng project demo
+├── backlog/                            # Backlog và tiêu chí nghiệm thu
+├── citrineos-core/                     # CSMS, OCPP server và Operator UI
+├── openems/                            # EMS: Edge, Backend và UI
+├── odoo-openems/                       # Addon Odoo Metadata Provider
+├── everest-demo/                       # Mô phỏng EV/EVSE và OCPP
+├── sap-charging-stations-simulator/    # Simulator tạo giao dịch OCPP tự động
+├── opencpo-charger-farm/               # Charger farm, stress và chaos test
+├── grafana/                            # Source Grafana
+├── influxdb/                           # Source InfluxDB
+├── rabbitmq-server/                    # Source RabbitMQ
+├── graphql-engine/                     # Source Hasura GraphQL Engine
+├── docker-postgis/                     # Source image PostgreSQL/PostGIS
+├── config/
+│   └── sap-simulator/                  # Cấu hình SAP Simulator của lab
+├── docker-compose.yml                  # Compose tổng của Energy Lab
+├── citrineos.override.yml              # Override CitrineOS cho Compose tổng
+├── energy_charging_simulator_repositories.md
+│                                        # Khảo sát và tiêu chí chọn simulator
+└── README.md                            # Giới thiệu và định hướng project
 ```
 
-Ba thư mục thành phần được tập hợp trong một repository chung và vẫn giữ hướng dẫn cài đặt riêng của từng dự án nguồn.
+Các dự án nguồn vẫn giữ README, giấy phép và hướng dẫn cài đặt riêng. `docker-compose.yml` ở thư mục gốc là điểm ghép stack Energy Lab; Odoo 18 được vận hành bên ngoài Compose này và không được khởi tạo thêm database Odoo.
+
+## Backlog
+
+- [`001-cai-dat-opendss.md`](./backlog/001-cai-dat-opendss.md): bổ sung mô phỏng lưới điện phân phối bằng OpenDSS;
+- [`002-huong-dan-van-hanh-stack.md`](./backlog/002-huong-dan-van-hanh-stack.md): viết hướng dẫn chạy stack cấp workspace;
+- [`003-ma-tran-cau-hinh-da-kiem-thu.md`](./backlog/003-ma-tran-cau-hinh-da-kiem-thu.md): quản lý phiên bản và bằng chứng cấu hình đã kiểm thử;
+- [`004-hop-dong-tich-hop-va-tu-dien-du-lieu.md`](./backlog/004-hop-dong-tich-hop-va-tu-dien-du-lieu.md): chuẩn hóa định danh, đơn vị và hợp đồng tích hợp;
+- [`005-ban-do-trang-thai-ket-noi.md`](./backlog/005-ban-do-trang-thai-ket-noi.md): phân biệt kết nối đã chạy, đã cấu hình và còn cần phát triển;
+- [`006-runbook-end-to-end.md`](./backlog/006-runbook-end-to-end.md): xây dựng bài lab và bằng chứng chạy xuyên suốt.
 
 ## Kiến thức và kỹ năng hướng đến
 
@@ -209,7 +254,9 @@ Ba thư mục thành phần được tập hợp trong một repository chung v�
 
 ## Trạng thái hiện tại
 
-Workspace đã tập hợp đủ ba nền tảng chính để bắt đầu nghiên cứu CSMS, EMS và nghiệp vụ metadata. Các bước tích hợp xuyên suốt, kho dữ liệu phân tích, dashboard KPI và bộ kịch bản điều độ vẫn là phạm vi cần tiếp tục xây dựng.
+Workspace đã tập hợp ba nền tảng chính, ba bộ mô phỏng trạm sạc, source của các dịch vụ dữ liệu/quan sát và một Compose tổng để bắt đầu dựng Energy Lab. Compose hiện ghép CitrineOS, OpenEMS, EVerest, InfluxDB và Grafana; SAP Simulator và OpenCPO Charger Farm là các profile tùy chọn.
+
+Sự hiện diện của source hoặc cấu hình chưa được xem là bằng chứng hệ thống đã chạy thành công. Vòng tích hợp xuyên suốt CitrineOS - OpenEMS - Odoo, kho dữ liệu phân tích, dashboard KPI, data contract và bộ kịch bản điều độ có thể tái lập vẫn cần được triển khai và xác minh theo các backlog.
 
 ## Tài liệu tham khảo trong workspace
 
