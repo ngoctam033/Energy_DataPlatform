@@ -1,0 +1,31 @@
+# Overrides are merged with the official CitrineOS Compose file.
+# !override requires Docker Compose >= 2.24.4.
+services:
+  citrine:
+    ports: !override
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:8082:8082"
+      - "127.0.0.1:8443:8443"
+      - "127.0.0.1:8444:8444"
+      - "127.0.0.1:9229:9229"
+    networks:
+      default:
+        aliases:
+          - host.docker.internal
+  citrine-ui:
+    ports: !override
+      - "127.0.0.1:3000:3000"
+  ocpp-db:
+    ports: !override
+      - "127.0.0.1:5433:5432"
+  amqp-broker:
+    ports: !override
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+  graphql-engine:
+    ports: !override
+      - "127.0.0.1:8090:8080"
+  citrineos-ocpi:
+    ports: !override
+      - "127.0.0.1:8085:8085"

@@ -1,0 +1,64 @@
+.DS_Store
+
+### Node ###
+# Logs
+logs
+*.log
+npm-debug.log*
+.pnpm-debug.log*
+
+# Dependency directories
+node_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Output of 'pnpm pack'
+*.tgz
+
+# Next.js build output
+.next
+out
+.vercel
+next-env.d.ts
+
+# Playwright
+playwright/
+playwright-report/
+test-results/
+reports/
+tests/e2e/.cache/
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Stores VSCode configurations
+.vscode
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# Server data
+/apps/ocpp-server/data
+/apps/ocpi-server/data
+
+# IntelliJ
+out/
+
+### Intellij+all Patch ###
+# Ignore everything but code style settings and run configurations
+# that are supposed to be shared within teams.
+
+.idea/*
+
+# Generated certificate backup files
+**/certificates/*.pem.backup
+
+coverage/

@@ -1,0 +1,20 @@
+import type { UpdateableState } from "src/app/edge/settings/system/jsonrpc/getUpdateables";
+import { EdgeConfig } from "src/app/shared/shared";
+import { Environment, Theme } from "src/environments";
+import { OemMeta } from "./oem-meta";
+
+export const theme: Omit<Environment, "url" | "backend" | "production" | "debugMode"> = {
+    theme: "OpenEMS" as Theme,
+
+    uiTitle: "OpenEMS UI",
+    uiTitleShort: "OpenEMS",
+    edgeShortName: "OpenEMS",
+    edgeLongName: "Open Energy Management System",
+
+    docsUrlPrefix: "https://github.com/OpenEMS/openems/blob/develop/",
+    PRODUCT_TYPES: () => null,
+    CLEANED_FACTORIES: (config: EdgeConfig): EdgeConfig["factories"] => config.factories,
+    CLEANED_UPDATEABLES: (updateables: UpdateableState[]): UpdateableState[] => updateables,
+    ENVIRONMENT_PROVIDERS: [],
+    ...OemMeta,
+};

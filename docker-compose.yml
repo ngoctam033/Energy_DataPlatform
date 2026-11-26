@@ -1,0 +1,168 @@
+# Energy lab: Docker Compose >= 2.24.4, Linux/amd64 recommended.
+# Place this file and citrineos.override.yml next to citrineos-core/.
+# Odoo is intentionally not part of this project.
+name: energy-lab
+
+include:
+  - path:
+      - ./citrineos-core/docker-compose.yml
+      - ./citrineos.override.yml
+    project_directory: ./citrineos-core
+
+services:
+  openems-edge:
+    image: openems/edge:${OPENEMS_TAG:-2026.1.0}
+    restart: unless-stopped
+    networks: [ems]
+    volumes:
+      - edge-config:/var/opt/openems/config
+      - edge-data:/var/opt/openems/data
+    ports:
+      - "127.0.0.1:8180:8080"
+      - "127.0.0.1:8185:8085"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  openems-backend:
+    image: openems/backend:${OPENEMS_TAG:-2026.1.0}
+    restart: unless-stopped
+    networks: [ems]
+    volumes:
+      - backend-config:/var/opt/openems/config
+      - backend-data:/var/opt/openems/data
+    ports:
+      - "127.0.0.1:8179:8079"
+      - "127.0.0.1:8181:8081"
+      - "127.0.0.1:8182:8082"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      openems-influxdb:
+        condition: service_healthy
+
+  openems-ui-edge:
+    image: openems/ui-edge:${OPENEMS_TAG:-2026.1.0}
+    restart: unless-stopped
+    networks: [ems]
+    environment:
+      WEBSOCKET_HOST: openems-edge
+      WEBSOCKET_PORT: "8085"
+    ports:
+      - "127.0.0.1:8100:80"
+    depends_on: [openems-edge]
+    volumes:
+      - edge-ui-config:/etc/nginx
+      - edge-ui-log:/var/log/nginx
+
+  openems-ui-backend:
+    image: openems/ui-backend:${OPENEMS_TAG:-2026.1.0}
+    restart: unless-stopped
+    networks: [ems]
+    environment:
+      WEBSOCKET_HOST: openems-backend
+      WEBSOCKET_PORT: "8082"
+    ports:
+      - "127.0.0.1:8101:80"
+    depends_on: [openems-backend]
+    volumes:
+      - backend-ui-config:/etc/nginx
+      - backend-ui-log:/var/log/nginx
+
+  openems-influxdb:
+    image: influxdb:2.9-alpine
+    restart: unless-stopped
+    networks: [ems]
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: openems
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:-energy-lab-influx-dev}
+      DOCKER_INFLUXDB_INIT_ORG: openems.io
+      DOCKER_INFLUXDB_INIT_BUCKET: openems
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:-energy-lab-influx-token-local-only}
+    volumes:
+      - influx-data:/var/lib/influxdb2
+      - influx-config:/etc/influxdb2
+    ports:
+      - "127.0.0.1:8086:8086"
+    healthcheck:
+      test: [CMD, influx, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # EVerest simulator uses the CitrineOS repository's Dockerfile and start.sh.
+  # Its upstream target is ws://host.docker.internal:8081/cp001.
+  # On the imported CitrineOS network, the alias resolves directly to citrine.
+  mqtt-server:
+    image: ghcr.io/everest/everest-demo/mqtt-server:${EVEREST_IMAGE_TAG:-2025.6.1-dt-esdp}
+    platform: linux/amd64
+    networks: [everest]
+
+  everest-manager:
+    build:
+      context: ./citrineos-core/apps/ocpp-server/everest
+      dockerfile: Dockerfile
+      args:
+        EVEREST_IMAGE_TAG: ${EVEREST_IMAGE_TAG:-2025.6.1-dt-esdp}
+    platform: linux/amd64
+    networks: [everest, default]
+    environment:
+      MQTT_SERVER_ADDRESS: mqtt-server
+      EVEREST_IMAGE_TAG: ${EVEREST_IMAGE_TAG:-2025.6.1-dt-esdp}
+      OCPP_VERSION: ${OCPP_VERSION:-2.0.1}
+    depends_on:
+      mqtt-server:
+        condition: service_started
+      citrine:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8888:8888"
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "0"
+    cpus: 2.0
+    mem_limit: 4g
+
+  everest-nodered:
+    image: ghcr.io/everest/everest-demo/nodered:${EVEREST_IMAGE_TAG:-2025.6.1-dt-esdp}
+    platform: linux/amd64
+    networks: [everest]
+    environment:
+      MQTT_SERVER_ADDRESS: mqtt-server
+      FLOWS: /config/config-sil-two-evse-flow.json
+    depends_on: [mqtt-server]
+    ports:
+      - "127.0.0.1:1880:1880"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    networks: [ems]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-energy-lab-grafana-dev}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on: [openems-influxdb]
+
+networks:
+  ems:
+    driver: bridge
+  everest:
+    driver: bridge
+    enable_ipv6: true
+
+volumes:
+  edge-config:
+  edge-data:
+  backend-config:
+  backend-data:
+  edge-ui-config:
+  edge-ui-log:
+  backend-ui-config:
+  backend-ui-log:
+  influx-data:
+  influx-config:
+  grafana-data:

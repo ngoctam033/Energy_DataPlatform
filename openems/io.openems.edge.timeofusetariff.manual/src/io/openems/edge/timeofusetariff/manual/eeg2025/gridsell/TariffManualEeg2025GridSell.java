@@ -1,0 +1,26 @@
+package io.openems.edge.timeofusetariff.manual.eeg2025.gridsell;
+
+import io.openems.common.channel.Level;
+import io.openems.edge.common.channel.Doc;
+import io.openems.edge.common.component.OpenemsComponent;
+import io.openems.edge.timeofusetariff.api.TariffGridSell;
+
+public interface TariffManualEeg2025GridSell extends OpenemsComponent, TariffGridSell {
+
+	public enum ChannelId implements io.openems.edge.common.channel.ChannelId {
+		UNABLE_TO_FETCH_MARKET_PRICES(Doc.of(Level.WARNING)//
+				.translationKey(TariffManualEeg2025GridSell.class, "unableToFetchMarketPrices")), //
+		;
+
+		private final Doc doc;
+
+		ChannelId(Doc doc) {
+			this.doc = doc;
+		}
+
+		@Override
+		public Doc doc() {
+			return this.doc;
+		}
+	}
+}

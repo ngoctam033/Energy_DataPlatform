@@ -1,0 +1,188 @@
+# SPDX-FileCopyrightText: 2025 Contributors to the CitrineOS Project
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Base stack for CitrineOS. Do not invoke this file directly — use the launcher
+# at the repository root, which selects the right files and profiles:
+#
+#   pnpm citrine            # ocpp-server + operator UI, ghcr.io images
+#   pnpm citrine --local    # build server + UI from local source
+#   pnpm citrine --solo     # ocpp-server only (no UI)
+#   pnpm citrine --ocpi     # add the OCPI server
+#
+# Profiles: `ui` adds the operator UI, `ocpi` adds the OCPI server. The
+# infrastructure services and `citrine` (the OCPP server) are always on.
+# Published images come from ghcr.io (built by push-release-tagged-server.yml,
+# push-release-tagged-operator-ui.yml, and push-release-tagged-ocpi.yml). The
+# OCPI image is published starting with the first release tag; until then,
+# `--ocpi` without `--local` will fail to pull (use `--local` to build it).
+services:
+  citrine:
+    image: ghcr.io/citrineos/citrineos-server:latest
+    pull_policy: always
+    volumes:
+      # Role definitions, re-read every roles.refreshIntervalSeconds. Mounted so an
+      # edit takes effect without a rebuild or a restart.
+      - ./apps/ocpp-server/src/assets/roles-seed.json:/usr/local/apps/citrineos/apps/ocpp-server/dist/assets/roles-seed.json
+    environment:
+      # Which process this container runs (EventGroup): 'all' = router + every module + APIs.
+      APP_NAME: 'all'
+      # Read by entrypoint.sh, not by the config loader.
+      DB_STRATEGY: 'migrate'
+      # ── SystemConfig overrides ──
+      # Every field of packages/types/src/config/types.ts can be set as
+      # CITRINEOS_<PATH_TO_FIELD> (case-insensitive, one segment per underscore, e.g.
+      # CITRINEOS_TIMEOUTS_MAXCALLLENGTHSECONDS). Values are JSON-parsed, falling back
+      # to the raw string. The schema defaults are the local-dev values, so only what
+      # actually differs inside Docker is listed here.
+      CITRINEOS_HOST: '0.0.0.0'
+      CITRINEOS_DATABASE_HOST: 'ocpp-db'
+      CITRINEOS_MESSAGEBROKER_AMQP_URL: 'amqp://guest:guest@amqp-broker:5672'
+      CITRINEOS_TIMEOUTS_MAXCALLLENGTHSECONDS: '20'
+      # The fileAccess root, which websocket-servers.json, the TLS material and the ACME
+      # account key are all read relative to. Absolute on purpose: the schema default is
+      # relative to the process working directory, and that differs between image
+      # generations (repo root in the fat image, the app directory in the slim one).
+      # dist/assets is populated by the build's copy-assets step and present in both.
+      CITRINEOS_FILEACCESS_LOCAL_DEFAULTFILEPATH: '/usr/local/apps/citrineos/apps/ocpp-server/dist/assets'
+      # The Swagger logo is the one path read straight from the filesystem instead of
+      # through fileAccess, so it needs the full path too.
+      CITRINEOS_SWAGGER_LOGOPATH: '/usr/local/apps/citrineos/apps/ocpp-server/dist/assets/logo.png'
+
+      # Certificate authorities are opt-in and off by default; the stack turns both on.
+      # '{}' takes every default of the block: the Hubject test PKI, and ACME against the
+      # Let's Encrypt staging directory with the account key from the fileAccess root.
+      CITRINEOS_INTEGRATIONS_V2GCA: '{}'
+      CITRINEOS_INTEGRATIONS_CHARGINGSTATIONCA: '{}'
+    depends_on:
+      ocpp-db:
+        condition: service_healthy
+      amqp-broker:
+        condition: service_healthy
+    ports:
+      - 8080:8080
+      - 8081:8081
+      - 8082:8082
+      # - 8083:8083   # freed for the seeded mock eMSP (partner seed expects host.docker.internal:8083)
+      - 8443:8443
+      - 8444:8444
+      - 9229:9229
+    healthcheck:
+      test: [
+          'CMD-SHELL',
+          "node -e \"const net = require(\\\"net\\\"); const client =
+          net.createConnection(8080, \\\"127.0.0.1\\\", () => { client.end();
+          process.exit(0); }); client.on(\\\"error\\\", () =>
+          process.exit(1)); client.setTimeout(5000, () => { client.destroy();
+          process.exit(1); });\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  citrine-ui:
+    image: ghcr.io/citrineos/citrineos-operator-ui:latest
+    pull_policy: always
+    profiles:
+      - ui
+    env_file:
+      - ./apps/operator-ui/.env.local
+    ports:
+      - 3000:3000
+    depends_on:
+      citrine:
+        condition: service_healthy
+      graphql-engine:
+        condition: service_healthy
+
+  citrineos-ocpi:
+    image: ghcr.io/citrineos/citrineos-ocpi:latest
+    pull_policy: always
+    profiles:
+      - ocpi
+    environment:
+      APP_NAME: 'ocpi'
+      APP_ENV: 'docker'
+      DB_HOST: 'ocpp-db'
+      AMQP_URL: 'amqp://guest:guest@amqp-broker:5672'
+      AMQP_EXCHANGE: 'citrineos'
+    ports:
+      - 8085:8085
+      # - 9229:9229
+    depends_on:
+      ocpp-db:
+        condition: service_healthy
+      amqp-broker:
+        condition: service_healthy
+      citrine:
+        condition: service_healthy
+
+  amqp-broker:
+    image: rabbitmq:3-management
+    ports:
+      - 15672:15672
+      - 5672:5672
+    environment:
+      RABBITMQ_DEFAULT_USER: 'guest'
+      RABBITMQ_DEFAULT_PASS: 'guest'
+    volumes:
+      - ./apps/ocpp-server/data/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q check_port_connectivity
+      interval: 10s
+      timeout: 10s
+      retries: 3
+
+  ocpp-db:
+    image: postgis/postgis:16-3.5
+    platform: linux/amd64
+    ports:
+      - 5432:5432
+    volumes:
+      - ./apps/ocpp-server/data/postgresql/pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: citrine
+      POSTGRES_USER: citrine
+      POSTGRES_PASSWORD: 'citrine'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432 -U citrine -d citrine']
+      interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  graphql-engine:
+    image: hasura/graphql-engine:v2.40.3.cli-migrations-v3
+    volumes:
+      - ./apps/ocpp-server/db/hasura-metadata:/hasura-metadata
+    ports:
+      - 8090:8080
+    restart: always
+    depends_on:
+      citrine:
+        condition: service_healthy
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://citrine:citrine@ocpp-db:5432/citrine
+      HASURA_GRAPHQL_ENABLE_CONSOLE: 'true'
+      HASURA_GRAPHQL_DEV_MODE: 'true'
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: startup, http-log, webhook-log, websocket-log, query-log
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: 'false'
+      HASURA_GRAPHQL_METADATA_DEFAULTS: "{\"backend_configs\":{\"dataconnector\":{\"a\
+        thena\":{\"uri\":\"http://data-connector-agent:8081/api/v1/athena\"},\"\
+        mariadb\":{\"uri\":\"http://data-connector-agent:8081/api/v1/mariadb\"},\
+        \"mysql8\":{\"uri\":\"http://data-connector-agent:8081/api/v1/mysql\"},\
+        \"oracle\":{\"uri\":\"http://data-connector-agent:8081/api/v1/oracle\"},\
+        \"snowflake\":{\"uri\":\"http://data-connector-agent:8081/api/v1/snowfl\
+        ake\"}}}}"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://graphql-engine:8080/healthz']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+
+# Name the default network `citrineos` so it is stable and project-independent.
+networks:
+  default:
+    name: citrineos

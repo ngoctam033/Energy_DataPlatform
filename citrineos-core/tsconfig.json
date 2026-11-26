@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "rootDir": "./",
+    "outDir": "./dist"
+  },
+  "exclude": [
+    "./dist/**/*",
+    "**/node_modules/**",
+    "**/vitest.config.ts",
+    "**/test/**",
+    "./migrations/**",
+    "./apps/operator-ui/**"
+  ],
+  "references": [
+    { "path": "./packages/types/tsconfig.src.json" },
+    { "path": "./packages/base/tsconfig.src.json" },
+    { "path": "./packages/dal/tsconfig.src.json" },
+    { "path": "./packages/ocpp/tsconfig.src.json" },
+    { "path": "./packages/ocpi/tsconfig.src.json" },
+    { "path": "./apps/ocpp-server/config/tsconfig.src.json" },
+    { "path": "./apps/ocpi-server/config/tsconfig.src.json" }
+  ]
+}

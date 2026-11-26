@@ -1,0 +1,118 @@
+= IO Heating Element
+
+Controls one or two three-phase heating elements via relay outputs according to grid active power.
+
+== Configuration and Step Model
+
+The controller supports the following configurations:
+
+* `ONE`: one heating element, 3 relay outputs and Levels 0 to 3
+* `TWO`: two heating elements, 6 relay outputs and Levels 0 to 6
+
+Each heating element has its own configured power per phase.
+Therefore, Heating Element A and Heating Element B may have different power values.
+
+The configuration is converted once into an ordered list of relay steps.
+The remaining controller logic works with this list, independently of the number of heating elements.
+
+[source,text]
+----
+                                  Config
+                                     |
+                 +-------------------+-------------------+
+                 |                                       |
+                ONE                                     TWO
+                 |                                       |
+       3 output channels                       6 output channels
+       power per phase A                 power per phase A and B
+                                                distribution
+                 |                                       |
+                 +-------------------+-------------------+
+                                     |
+                                     v
+                           buildHeatingSteps()
+                                     |
+                                     v
+                       List<HeatingElementStep>
+                                     |
+                    +----------------+----------------+
+                    |                |                |
+                    v                v                v
+               applyLevel()    power per Level   target Level
+----
+
+== Distribution, Levels and Power
+
+A *Level* represents the number of active relay steps.
+Level N means that the first N steps of the configured order are switched on.
+
+For `ONE`, the order is always:
+
+[source,text]
+----
+A-L1 -> A-L2 -> A-L3
+----
+
+For `TWO`, the order is selected by the configured distribution:
+
+* `SEQUENTIAL`: `A-L1 -> A-L2 -> A-L3 -> B-L1 -> B-L2 -> B-L3`
+* `PARALLEL`: `A-L1 -> B-L1 -> A-L2 -> B-L2 -> A-L3 -> B-L3`
+
+The required power of a Level is the sum of the nominal powers of its active steps.
+It is not calculated as `Level * powerPerPhase`.
+
+Example with A = 2000 W per phase and B = 1000 W per phase:
+
+[cols="1,1,1",options="header"]
+|===
+|Level |SEQUENTIAL |PARALLEL
+
+|0 |0 W |0 W
+|1 |2000 W |2000 W
+|2 |4000 W |3000 W
+|3 |6000 W |5000 W
+|4 |7000 W |6000 W
+|5 |8000 W |8000 W
+|6 |9000 W |9000 W
+|===
+
+== Switching Behaviour
+
+The same switching rules apply to both the 4-level and the 7-level configuration:
+
+* `OFF`: switch immediately to Level 0.
+* `FAST_HEAT`: switch immediately to the maximum available Level; after 5 hours of continuous heating, switch to Level 0 (`FAST_HEAT_PROTECTION_PAUSE`) for a 30-minute cooldown pause before resuming.
+* `SURPLUS`:
+** when reducing power, switch immediately to the required lower Level;
+** when increasing power, activate at most one additional Level after the configured `minimumSwitchingTime`.
+
+The switching delay therefore applies between two consecutive switch-on operations.
+It does not delay switching off or switching to a lower Level.
+
+== Meter and Calibration
+
+A meter is optional.
+
+With `ONE`, the existing behaviour remains unchanged:
+
+* with a meter, the existing calibration and average-power calculation is used;
+* without a meter, the configured power per phase is used.
+
+With `TWO`, one common meter may be configured for both heating elements.
+Automatic per-phase calibration is not used.
+The nominal power of every step is always derived from the separately configured power-per-phase values of Heating Elements A and B.
+
+== Legacy Modes and Schedule
+
+The existing `Mode`, `WorkMode`, `defaultLevel` and `schedule` configuration remains supported for backward compatibility.
+This includes the existing `NONE`, `TIME` and `ENERGY` work modes and the ability to select a specific `defaultLevel`.
+
+For `TWO`, the same logic also accepts Levels 4 to 6. Scheduled Level values are limited to the maximum Level of the configured variant.
+The schedule uses JSCalendar format and takes effect in automatic mode with the supported work modes.
+
+Schedule examples are available in:
+
+* https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.controller.io.heatingelement/test/io/openems/edge/controller/io/heatingelement/ControllerHeatingElementImplTest9.java[ControllerHeatingElementImplTest9.java]
+* https://github.com/OpenEMS/openems/blob/develop/io.openems.edge.controller.io.heatingelement/test/io/openems/edge/controller/io/heatingelement/ControllerHeatingElementImplTest10.java[ControllerHeatingElementImplTest10.java]
+
+https://github.com/OpenEMS/openems/tree/develop/io.openems.edge.controller.io.heatingelement[Source Code icon:github[]]

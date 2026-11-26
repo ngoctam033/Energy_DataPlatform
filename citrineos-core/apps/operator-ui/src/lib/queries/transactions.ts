@@ -1,0 +1,196 @@
+// SPDX-FileCopyrightText: 2025 Contributors to the CitrineOS Project
+//
+// SPDX-License-Identifier: Apache-2.0
+
+import { gql } from 'graphql-tag';
+import { LOCATION_CORE_FIELDS } from '@lib/queries/fields/location-fields';
+import { AUTHORIZATION_FIELDS } from '@lib/queries/fields/authorization-fields';
+import { CHARGING_STATION_CORE_FIELDS } from '@lib/queries/fields/charging-station-fields';
+import { EVSE_CORE_FIELDS } from '@lib/queries/fields/evse-fields';
+import { TRANSACTION_DETAIL_FIELDS } from '@lib/queries/fields/transaction-fields';
+import { CONNECTOR_CORE_FIELDS } from '@lib/queries/fields/connector-fields';
+import { TARIFF_FIELDS } from '@lib/queries/fields/tariff-fields';
+
+export const TRANSACTION_LIST_QUERY = gql`
+  query TransactionList(
+    $offset: Int!
+    $limit: Int!
+    $order_by: [Transactions_order_by!]
+    $where: Transactions_bool_exp
+  ) {
+    Transactions(offset: $offset, limit: $limit, order_by: $order_by, where: $where) {
+      ${TRANSACTION_DETAIL_FIELDS}
+      location: Location {
+        ${LOCATION_CORE_FIELDS}
+      }
+      evse: Evse {
+        ${EVSE_CORE_FIELDS.omit('evseTypeId', 'evseId')}
+      }
+      connector: Connector {
+        ${CONNECTOR_CORE_FIELDS}
+      }
+      authorization: Authorization {
+        ${AUTHORIZATION_FIELDS.omit('allowedConnectorTypes', 'disallowedEvseIdPrefixes', 'realTimeAuth', 'realTimeAuthUrl')}
+      }
+      station: ChargingStation {
+        ${CHARGING_STATION_CORE_FIELDS}
+        location: Location {
+          ${LOCATION_CORE_FIELDS}
+        }
+      }
+    }
+    Transactions_aggregate(where: $where) {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+export const GET_TRANSACTIONS_FOR_AUTHORIZATION = gql`
+  query TransactionsList(
+    $id: Int!
+    $limit: Int!
+    $offset: Int!
+    $order_by: [Transactions_order_by!]
+    $where: Transactions_bool_exp = {}
+  ) {
+    Transactions(
+      offset: $offset
+      limit: $limit
+      order_by: $order_by
+      where: { _and: [{ authorizationId: { _eq: $id } }, $where] }
+    ) {
+      ${TRANSACTION_DETAIL_FIELDS}
+      station: ChargingStation {
+        ${CHARGING_STATION_CORE_FIELDS}
+        location: Location {
+          ${LOCATION_CORE_FIELDS}
+        }
+      }
+      TransactionEvents(where: { eventType: { _eq: "Started" } }) {
+        eventType
+        idTokenValue
+        idTokenType
+      }
+      StartTransaction {
+        idTokenDatabaseId
+      }
+    }
+    Transactions_aggregate(where: { _and: [{ authorizationId: { _eq: $id } }, $where] }) {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+export const GET_TRANSACTION_LIST_FOR_STATION = gql`
+  query GetTransactionListForStation(
+    $stationId: Int!
+    $where: [Transactions_bool_exp!] = []
+    $order_by: [Transactions_order_by!] = {}
+    $offset: Int
+    $limit: Int
+  ) {
+    Transactions(
+      where: { stationId: { _eq: $stationId }, _and: $where }
+      order_by: $order_by
+      offset: $offset
+      limit: $limit
+    ) {
+      ${TRANSACTION_DETAIL_FIELDS}
+      stationId
+      TransactionEvents(where: { eventType: { _eq: "Started" } }) {
+        eventType
+        idTokenValue
+        idTokenType
+      }
+      StartTransaction {
+        idTokenDatabaseId
+      }
+      authorization: Authorization {
+        id
+        idToken
+      }
+      station: ChargingStation {
+        ${CHARGING_STATION_CORE_FIELDS.omit('ocppConnectionName', 'protocol')}
+        location: Location {
+          ${LOCATION_CORE_FIELDS}
+        }
+      }
+    }
+    Transactions_aggregate(where: { stationId: { _eq: $stationId }, _and: $where }) {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+// TODO when possible, include the total time as well
+export const TRANSACTION_SUCCESS_RATE_QUERY = gql`
+  query TransactionsSuccessRate {
+    success: Transactions_aggregate(where: { totalKwh: { _gt: 0 } }) {
+      aggregate {
+        count
+      }
+    }
+    total: Transactions_aggregate {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+// Transactions is partitioned by `createdAt`, so its primary key is the
+// composite (id, createdAt) and Hasura's `Transactions_by_pk` demands both
+// columns. The detail route only carries `id`, so this selects the row with a
+// `where` filter instead and aliases the result to the `Transactions_by_pk`
+// field name that the Hasura data provider reads the response off of. The
+// alias yields a single-element array, which `getSingleFromListPlainToInstanceOptions`
+// unwraps back into the object `useOne` callers expect.
+export const TRANSACTION_GET_QUERY = gql`
+  query GetTransactionById($id: Int!) {
+    Transactions_by_pk: Transactions(where: { id: { _eq: $id } }, limit: 1) {
+      ${TRANSACTION_DETAIL_FIELDS}
+      stationId
+      locationId
+      authorizationId
+      location: Location {
+        ${LOCATION_CORE_FIELDS}
+      }
+      evse: Evse {
+        ${EVSE_CORE_FIELDS}
+      }
+      connector: Connector {
+        ${CONNECTOR_CORE_FIELDS}
+        tariff: Tariff {
+          ${TARIFF_FIELDS.pick('id', 'currency', 'pricePerKwh')}
+        }
+      }
+      authorization: Authorization {
+        ${AUTHORIZATION_FIELDS.omit('allowedConnectorTypes', 'disallowedEvseIdPrefixes', 'realTimeAuth', 'realTimeAuthUrl')}
+      }
+      station: ChargingStation {
+        ${CHARGING_STATION_CORE_FIELDS}
+      }
+    }
+  }
+`;
+
+// Same composite-key constraint as TRANSACTION_GET_QUERY: `pk_columns` would
+// have to carry `createdAt` as well, so update by `where` on the id and alias
+// back to the `update_Transactions_by_pk` response key.
+export const TRANSACTION_EDIT_MUTATION = gql`
+  mutation TransactionEdit($id: Int!, $object: Transactions_set_input!) {
+    update_Transactions_by_pk: update_Transactions(where: { id: { _eq: $id } }, _set: $object) {
+      returning {
+        id
+        isActive
+        updatedAt
+      }
+    }
+  }
+`;

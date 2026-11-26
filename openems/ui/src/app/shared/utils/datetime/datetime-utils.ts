@@ -1,0 +1,173 @@
+import { TZDate } from "@date-fns/tz";
+import { differenceInMilliseconds, format, isMatch, isSameYear, startOfMonth, startOfYear } from "date-fns";
+import { de } from "date-fns/locale";
+import { ChronoUnit } from "src/app/edge/history/shared";
+import { Language } from "src/app/shared/type/language";
+import { QueryHistoricTimeseriesDataResponse } from "../../jsonrpc/response/queryHistoricTimeseriesDataResponse";
+import { QueryHistoricTimeseriesEnergyPerPeriodResponse } from "../../jsonrpc/response/queryHistoricTimeseriesEnergyPerPeriodResponse";
+import { DateUtils } from "../date/dateutils";
+
+export const DATE_TIME_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/;
+
+/** IONIC implemented DateTime formats */
+export enum DateTimeFormats {
+    /* https://date-fns.org/v4.1.0/docs/format */
+    YEAR = "yyyy",
+    YEAR_MONTH_DAY = "yyyy-MM-dd",
+    YEAR_MONTH_DAY_TIME = "yyyy-MM-dd'T'HH:mm",
+    YEAR_MONTH_DAY_TIME_WITH_SECONDS = "yyyy-MM-dd'T'HH:mm:ss",
+    YEAR_MONTH_DAY_TIME_UTC_TIMEZONE = "yyyy-MM-dd'T'HH:mm:ss'Z'",
+    HOUR_MINUTE = "HH:mm",
+    HOUR_MINUTE_SECONDS = "HH:mm:ss",
+    ONE_TO_24_HOUR_MINUTE_SECONDS = "kk:mm:ss",
+    DAY_MONTH_YEAR = "dd.MM.yyyy",
+    WEEKDAY = "E", // Mon, Tue, Wed, ..., Sun
+    YEAR_MONTH_DAY_TIME_WITH_TZ = "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+}
+
+export class DateTimeUtils {
+    public static INVALID_DATE_TIME_STRING: string = "Invalid datetime string";
+
+    public static getLocaleTimeZone() {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    }
+    /**
+     * Tests if the given string matches at least one of the ionic supported datetime formats.
+     *
+     * @param dateTime The date time string
+     */
+    public static isOfValidDateTimeFormat(dateTime: string | null) {
+        if (!dateTime) {
+            throw Error(this.INVALID_DATE_TIME_STRING);
+        }
+        return Object.values(DateTimeFormats).some((el) => isMatch(dateTime, el));
+    }
+
+    /**
+     * Normalizes timestamps depending on chosen period
+     *
+     * E.g fills up dataset with 11 months with 1 month to show full 12 months
+     *
+     * @param unit The Chronounit
+     * @param energyPerPeriodResponse The timeseries data
+     * @returns The adjusted timestamps
+     */
+    public static normalizeTimestamps(
+        unit: ChronoUnit.Type,
+        energyPerPeriodResponse: QueryHistoricTimeseriesDataResponse | QueryHistoricTimeseriesEnergyPerPeriodResponse,
+    ): QueryHistoricTimeseriesDataResponse | QueryHistoricTimeseriesEnergyPerPeriodResponse {
+        if (energyPerPeriodResponse.result.timestamps.length === 0) {
+            return energyPerPeriodResponse;
+        }
+
+        switch (unit) {
+            case ChronoUnit.Type.MONTHS: {
+                const firstDate = DateUtils.stringToDate(energyPerPeriodResponse.result.timestamps.at(0) ?? null);
+                const lastDate = DateUtils.stringToDate(energyPerPeriodResponse.result.timestamps.at(-1) ?? null);
+
+                if (firstDate === null || lastDate === null) {
+                    return energyPerPeriodResponse;
+                }
+
+                // Change first timestamp to start of month
+                const firstTimestamp = startOfMonth(firstDate);
+                energyPerPeriodResponse.result.timestamps[0] = format(firstTimestamp, "yyyy-MM-dd HH:mm:ss", {
+                    locale: de,
+                });
+
+                const newTimestamps: string[] = [];
+
+                if (firstTimestamp.getMonth() !== 0 && isSameYear(lastDate, firstTimestamp)) {
+                    for (let i = 0; i <= firstTimestamp.getMonth() - 1; i++) {
+                        newTimestamps.push(new Date(firstTimestamp.getFullYear(), i).toString());
+
+                        for (const channel of Object.keys(energyPerPeriodResponse.result.data)) {
+                            energyPerPeriodResponse.result.data[channel.toString()]?.unshift(null);
+                        }
+                    }
+                }
+
+                energyPerPeriodResponse.result.timestamps = newTimestamps.concat(
+                    energyPerPeriodResponse.result.timestamps,
+                );
+                return energyPerPeriodResponse;
+            }
+
+            case ChronoUnit.Type.YEARS: {
+                const formattedTimestamps: string[] = [];
+
+                // Change dates to be first day of year
+                for (const timestamp of energyPerPeriodResponse.result.timestamps) {
+                    const date = DateUtils.stringToDate(timestamp);
+                    if (date === null) {
+                        return energyPerPeriodResponse;
+                    }
+                    formattedTimestamps.push(format(startOfYear(date), "yyyy-MM-dd HH:mm:ss", { locale: de }));
+                }
+
+                energyPerPeriodResponse.result.timestamps = formattedTimestamps;
+                return energyPerPeriodResponse;
+            }
+            default:
+                return energyPerPeriodResponse;
+        }
+    }
+
+    public static isDifferenceInSecondsGreaterThan(seconds: number, currentDate: Date, dateToCompare: Date | null) {
+        if (dateToCompare == null) {
+            return false;
+        }
+        const milliSeconds = seconds * 1000;
+        return differenceInMilliseconds(currentDate, dateToCompare) > milliSeconds;
+    }
+
+    /**
+     * Formats a datetime string into ISO8601 'YYYY-MM-DDTHH:mm:ss.SSS'.
+     *
+     * @param datetime The datetime string
+     * @returns The datetime string as ISO8601 'YYYY-MM-DDTHH:mm:ss.SSS' format
+     */
+    public static formatToISOZonedDateTime(
+        datetime: string | null,
+        timeZone: string = DateTimeUtils.getLocaleTimeZone(),
+    ): string | null {
+        if (datetime == null) {
+            return null;
+        }
+
+        if (!DateTimeUtils.isOfValidDateTimeFormat(datetime)) {
+            throw new Error(DateTimeUtils.INVALID_DATE_TIME_STRING);
+        }
+        return new TZDate(datetime, timeZone).toISOString();
+    }
+
+    /**
+     * Formats the given date to display only the hour, respecting the 12-hour or 24-hour format based on the given
+     * language. If the selected language typically uses a suffix for hours (e.g., "Uhr" in German), it will be included
+     * automatically by the formatter.
+     *
+     * @param date - The date to format.
+     * @param language - The selected language containing locale information.
+     * @returns The formatted hour string (e.g., "8 PM" in English, "20 Uhr" in German).
+     */
+    public static formatHour(date: Date, language: Language): string {
+        return new Intl.DateTimeFormat(language.i18nLocaleKey, {
+            hour: "numeric",
+        }).format(date);
+    }
+
+    public static format(date: Date | null, dateFormat: DateTimeFormats): string | null {
+        if (date == null) {
+            return null;
+        }
+        return format(date, dateFormat);
+    }
+
+    public static formatWithLocale(date: Date | null, dateFormat: DateTimeFormats): string | null {
+        if (date == null) {
+            return null;
+        }
+        const locale = Language.getCurrentLanguage().dateFnsLocale;
+        return format(date, dateFormat, { locale });
+    }
+}

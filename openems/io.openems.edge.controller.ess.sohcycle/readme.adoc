@@ -1,0 +1,60 @@
+= ESS SoH Cycle Controller
+
+The ESS SoH Cycle Controller determines the State of Health (SoH) of an Energy Storage System (ESS) by performing a controlled charge and discharge cycle and evaluating the measured discharge capacity.
+
+An optional reference cycle can be performed before the measurement cycle.
+
+== Configuration
+
+The controller supports the following main configuration options:
+
+* `isRunning`: Enables or disables the SoH cycle.
+* `referenceCycleEnabled`: Enables an additional reference cycle before the measurement.
+* `ess_id`: Identifies the ESS to be measured.
+
+== Cycle
+
+The controller prepares the battery by discharging it towards 0% SoC.
+An optional reference cycle then charges and discharges the battery before the measurement cycle begins.
+
+During the measurement cycle, the battery is charged towards 100% SoC, cell balancing is evaluated, and the battery is discharged towards 0% SoC to determine its usable capacity.
+
+Charging and discharging normally use a 0.2C rate.
+The active phases are separated by 30-minute rest periods to allow battery voltages to stabilize.
+During these periods, the controller targets 0 W battery power, accounting for DC production when calculating the ESS power setpoint.
+
+=== Unavailable charge or discharge power
+
+The battery may stop permitting charging or discharging before reaching the nominal 0% or 100% SoC endpoint.
+
+During preparation, the controller can attempt one controlled precharge to restore discharge capability.
+
+If the required power remains unavailable, the controller can accept the current SoC as the physical endpoint and continue the cycle.
+This prevents indefinite waiting for an endpoint that the battery cannot reach.
+
+See link:doc/statemachine.md[State Machine] for the detailed recovery conditions and state transitions.
+
+== Results and Monitoring
+
+The main monitoring channels include:
+
+* `StateMachine`: Current state of the SoH cycle.
+* `SohPercent`: Calculated SoH percentage.
+* `SohRawDebug`: Unclamped SoH calculation result.
+* `MeasuredCapacity`: Measured discharge capacity in Wh.
+* `VoltageDelta`: Cell-voltage difference in V, used to evaluate battery balancing and available for historical analysis.
+* `IsBatteryBalanced`: Result of the battery balancing check.
+
+The SoH result is calculated from the measured discharge-energy counter difference.
+SoC is used to control cycle endpoints, without applying a SoC-based correction factor to the measured capacity.
+
+== Battery Balancing
+
+During measurement charging, the controller collects minimum and maximum cell voltages.
+Their difference is evaluated against a 100 mV threshold to assess cell balancing.
+
+The minimum and maximum values are tracked independently and may originate from different points in time.
+The resulting voltage difference therefore represents the observed charging range rather than necessarily an instantaneous cell-voltage difference.
+
+The balancing check does not prevent the SoH measurement from continuing.
+Missing measurements or balancing errors are reported through the balancing status, while the controller proceeds with the measurement discharge.

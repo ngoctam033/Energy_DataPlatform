@@ -1,0 +1,160 @@
+// @ts-strict-ignore
+import { ChangeDetectionStrategy, Component, effect, inject, OnDestroy, OnInit } from "@angular/core";
+import { Meta, Title } from "@angular/platform-browser";
+import { Router } from "@angular/router";
+import { SplashScreen } from "@capacitor/splash-screen";
+import { MenuController, ModalController, NavController, Platform, ToastController } from "@ionic/angular";
+import { Subject, Subscription } from "rxjs";
+import { filter, takeUntil } from "rxjs/operators";
+import { environment } from "../environments";
+import { PlatFormService } from "./platform.service";
+import { NavigationService } from "./shared/components/navigation/service/navigation.service";
+import { LayoutRefreshService } from "./shared/service/layoutRefreshService";
+import { RouteService } from "./shared/service/route/route.service";
+import { UserService } from "./shared/service/user.service";
+import { Service, UserPermission, Websocket } from "./shared/shared";
+import { TutorialTargetId } from "./shared/tour/tutorial-target-id";
+import { Language } from "./shared/type/language";
+
+@Component({
+    selector: "app-root",
+    templateUrl: "app.component.html",
+    changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+})
+export class AppComponent implements OnInit, OnDestroy {
+    public environment = environment;
+    public backUrl: string | boolean = "/";
+    public enableSideMenu: boolean;
+    public isSystemLogEnabled: boolean = false;
+
+    protected isUserAllowedToSeeOverview: boolean = false;
+    protected isUserAllowedToSeeFooter: boolean = false;
+    protected isHistoryDetailView: boolean = false;
+    protected latestIncident: { message: string | null; id: string } | null = null;
+
+    protected isSmartphone: boolean = false;
+
+    private readonly tutorialTargetId = TutorialTargetId;
+    private ngUnsubscribe: Subject<void> = new Subject<void>();
+    private readonly userService: UserService = inject(UserService);
+    private subscription: Subscription = new Subscription();
+
+    constructor(
+        private platform: Platform,
+        public menu: MenuController,
+        public modalCtrl: ModalController,
+        public router: Router,
+        public service: Service,
+        public toastController: ToastController,
+        public websocket: Websocket,
+        private meta: Meta,
+        private appService: PlatFormService,
+        private title: Title,
+        protected navigationService: NavigationService,
+        protected navCtrl: NavController,
+        private routeService: RouteService,
+        private layoutRefresh: LayoutRefreshService,
+    ) {
+        service.setLang(Language.getCurrentLanguage());
+
+        this.isSmartphone = this.service.getIsSmartphoneResolution();
+
+        this.subscription.add(
+            this.service.metadata.pipe(filter((metadata) => !!metadata)).subscribe((metadata) => {
+                this.isUserAllowedToSeeOverview = UserPermission.isUserAllowedToSeeOverview(metadata.user);
+                this.isUserAllowedToSeeFooter = UserPermission.isUserAllowedToSeeFooter(metadata.user);
+            }),
+        );
+
+        effect(() => {
+            const url = this.routeService.currentUrl();
+            if (url == null) {
+                return;
+            }
+
+            // Hide footer for history detail views
+            const segments = url.split("/");
+            this.isHistoryDetailView = segments.slice(0, -1).includes("history") && !segments.includes("export");
+        });
+
+        this.subscription.add(
+            // The new navigation maintains its own parent-child history, so handle back presses here first.
+            // Fall back to Ionic when there is no parent node or the new navigation is not active.
+            this.platform.backButton.subscribeWithPriority(10, (processNextHandler) => {
+                if (
+                    NavigationService.isNewNavigation(
+                        this.userService.currentUser(),
+                        this.service.currentEdge()?.getConfigSignal()(),
+                    )
+                ) {
+                    const parentNode = this.navigationService.currentNode()?.parent;
+                    if (parentNode != null) {
+                        void this.navigationService.navigateAbsolute(parentNode);
+                        return;
+                    }
+                }
+
+                processNextHandler();
+            }),
+        );
+
+        this.appService.listen();
+        SplashScreen.hide();
+    }
+
+    public navigateToUser() {
+        const prev = this.routeService.getCurrentUrl();
+        const base = prev.replace(/^\//, "");
+        const userUrl = base + "/user";
+
+        this.navCtrl.navigateRoot(userUrl);
+        this.menu.close();
+    }
+
+    ngOnDestroy() {
+        this.ngUnsubscribe.next();
+        this.ngUnsubscribe.complete();
+        this.subscription.unsubscribe();
+    }
+
+    ngOnInit() {
+        // Checks if sessionStorage is not null, undefined or empty string
+        if (localStorage.getItem("DEBUGMODE")) {
+            this.environment.debugMode = JSON.parse(localStorage.getItem("DEBUGMODE"));
+        }
+
+        this.service.notificationEvent.pipe(takeUntil(this.ngUnsubscribe)).subscribe(async (notification) => {
+            const toast = await this.toastController.create({
+                message: notification.message,
+                position: "top",
+                duration: 2000,
+                buttons: [
+                    {
+                        text: "Ok",
+                        role: "cancel",
+                    },
+                ],
+            });
+            toast.present();
+        });
+
+        this.platform.ready().then(() => {
+            // OEM colors exist only after ionic is initialized, so the notch color has to be set here
+            const notchColor = getComputedStyle(document.documentElement).getPropertyValue("--ion-color-background");
+            this.meta.updateTag({ name: "theme-color", content: notchColor });
+
+            this.appService.handleResize(this.platform, this.service, this.ngUnsubscribe);
+        });
+
+        this.title.setTitle(environment.edgeShortName);
+    }
+
+    /**
+     * Called by the router-outlet (activate) event on every route change. Triggers a delayed window resize so chart
+     * components recalculate their dimensions (WCAG 1.4.4 compliance).
+     */
+    private onActivate(_event: any): void {
+        this.layoutRefresh.request(300);
+    }
+}

@@ -1,0 +1,123 @@
+import { Location } from "@angular/common";
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, HostListener, Input, OnInit, QueryList, ViewChild, ViewChildren, } from "@angular/core";
+import { PopoverController } from "@ionic/angular";
+import { NavigationService } from "../../navigation/service/navigation.service";
+
+export type NavigationOption = {
+    id: string;
+    callback: () => void;
+    alias?: string;
+    isEnabled?: boolean;
+    icon?: string;
+};
+
+@Component({
+    selector: "oe-footer-subnavigation",
+    templateUrl: "footerNavigation.html",
+    changeDetection: ChangeDetectionStrategy.Eager,
+    standalone: false,
+})
+export class FooterNavigationComponent implements OnInit {
+    private static readonly INTERVAL: number = 1000;
+
+    @ViewChildren("subnavigationbuttons", { read: ElementRef })
+    public subnavigationbuttons!: QueryList<ElementRef>;
+    @ViewChild("container", { read: ElementRef }) public container!: ElementRef;
+    @Input() public backButton: boolean = false;
+
+    protected areButtonsReadyToShow: boolean = false;
+    protected buttons: NavigationOption[] = [];
+    protected popoverButtons: NavigationOption[] = [];
+    protected showPopover: boolean = false;
+    protected isInitialized: boolean = false;
+
+    private _buttons: NavigationOption[] = [];
+
+    constructor(
+        protected location: Location,
+        protected popoverCtrl: PopoverController,
+        private cdr: ChangeDetectorRef,
+        private navigationService: NavigationService,
+    ) {}
+
+    @Input() public set navigationOptions(nodes: NavigationOption[]) {
+        this._buttons = nodes;
+        this.buttons = this.getAllowedButtons();
+        this.popoverButtons = [];
+    }
+    @HostListener("window:resize", ["$event.target.innerWidth"])
+    public onResize(width: number) {
+        this.initializeFooterSubnavigation();
+    }
+
+    ngOnInit() {
+        this.cdr.detectChanges();
+        this.initializeFooterSubnavigation();
+    }
+
+    protected togglePopover(popoverbtn: NavigationOption) {
+        popoverbtn.callback();
+        this.showPopover = false;
+    }
+
+    /** Initializes sub-navigation */
+    private initializeFooterSubnavigation(): void {
+        if (this.navigationService.position() == "bottom") {
+            this.isInitialized = false;
+            return;
+        }
+
+        this.buttons = this.getAllowedButtons();
+        this.getSplitIndex().then((indexToSplit) => {
+            if (indexToSplit == null) {
+                return;
+            }
+
+            const allowedButtons = this.getAllowedButtons();
+            this.buttons = allowedButtons.slice(0, indexToSplit);
+            this.popoverButtons = allowedButtons.slice(indexToSplit);
+            this.areButtonsReadyToShow = true;
+        });
+        this.isInitialized = true;
+    }
+
+    private getAllowedButtons(): NavigationOption[] {
+        return this._buttons.filter((button) => button.isEnabled == null || button.isEnabled);
+    }
+
+    /**
+     * Gets the split index for navigation buttons
+     *
+     * @returns A promise
+     */
+    private async getSplitIndex(): Promise<number> {
+        return new Promise<number>((resolve) => {
+            let indexToSplit: number = 0;
+
+            const interval = setInterval(() => {
+                if (this.subnavigationbuttons && this.container) {
+                    const colLeftPadding = 16;
+                    const paddingLeftRight = 24;
+                    const ionItemWidth = this.container?.nativeElement.offsetWidth - colLeftPadding;
+                    if (ionItemWidth) {
+                        let sum: number = colLeftPadding;
+                        this.subnavigationbuttons.forEach((b, index, el) => {
+                            sum += b.nativeElement.offsetWidth + paddingLeftRight;
+                            if (ionItemWidth > sum) {
+                                indexToSplit = index;
+                            }
+                        });
+
+                        // Workaround
+                        if (ionItemWidth > sum) {
+                            ++indexToSplit;
+                        }
+
+                        clearInterval(interval);
+                        resolve(indexToSplit);
+                    }
+                }
+            }, FooterNavigationComponent.INTERVAL);
+        });
+    }
+}
