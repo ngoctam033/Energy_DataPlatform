@@ -1,0 +1,45 @@
+services:
+  openems-backend:
+    volumes:
+      - ./simulation/.runtime/openems/backend-metadata.json:/var/opt/openems/metadata.json:ro
+
+  openems-edge-site02:
+    image: openems/edge:2026.1.0
+    restart: unless-stopped
+    networks: [ems]
+    volumes:
+      - edge-site02-config:/var/opt/openems/config
+      - edge-site02-data:/var/opt/openems/data
+    ports:
+      - "127.0.0.1:8280:8080"
+      - "127.0.0.1:8285:8085"
+
+  openems-edge-site03:
+    image: openems/edge:2026.1.0
+    restart: unless-stopped
+    networks: [ems]
+    volumes:
+      - edge-site03-config:/var/opt/openems/config
+      - edge-site03-data:/var/opt/openems/data
+    ports:
+      - "127.0.0.1:8380:8080"
+      - "127.0.0.1:8385:8085"
+
+  openems-edge-site04:
+    image: openems/edge:2026.1.0
+    restart: unless-stopped
+    networks: [ems]
+    volumes:
+      - edge-site04-config:/var/opt/openems/config
+      - edge-site04-data:/var/opt/openems/data
+    ports:
+      - "127.0.0.1:8480:8080"
+      - "127.0.0.1:8485:8085"
+
+volumes:
+  edge-site02-config:
+  edge-site02-data:
+  edge-site03-config:
+  edge-site03-data:
+  edge-site04-config:
+  edge-site04-data:

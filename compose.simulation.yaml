@@ -1,0 +1,21 @@
+services:
+  everest-nodered:
+    networks: [everest, ems, default]
+    env_file: ./simulation/.runtime/runtime.env
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      SIM_CONFIG_ROOT: /simulation
+      SIM_STATE_ROOT: /data/simulation
+    volumes:
+      - ./simulation:/simulation:ro
+      - ./simulation/.runtime/node-red:/data
+      - ./simulation/.runtime/vendor-config:/config
+  sap-charging-simulator:
+    volumes:
+      - ./simulation/.runtime/sap.json:/usr/app/dist/assets/config.json:ro
+      - ./simulation/sap/templates:/usr/app/dist/assets/station-templates:ro
+      - ./simulation/config/vehicle_profiles.json:/usr/app/dist/assets/simulation-vehicles.json:ro
+      - simulation-sap-state:/usr/app/dist/assets/configurations
+    mem_limit: 2g
+volumes:
+  simulation-sap-state:
