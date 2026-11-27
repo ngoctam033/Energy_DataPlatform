@@ -1,0 +1,77 @@
+{
+  "command": "plan",
+  "deploymentId": "energy-lab-4-sites",
+  "createdAt": "2026-11-27T08:47:49.351Z",
+  "sites": [
+    {
+      "edgeId": "site01",
+      "websocketUrl": "ws://127.0.0.1:8185",
+      "actions": [
+        {
+          "kind": "app",
+          "action": "adopt-existing-component",
+          "appId": "App.Api.RestJson.ReadWrite",
+          "controllerId": "ctrlSimulationRest",
+          "reason": "Component already exists; no duplicate App instance is created"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Core.Meta",
+          "componentId": "_meta"
+        },
+        {
+          "kind": "component",
+          "action": "update",
+          "factoryPid": "Controller.Api.Backend",
+          "componentId": "ctrlBackend0",
+          "properties": {
+            "apikey": "<redacted>"
+          }
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "simulateConsumption"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.GridMeter.Acting",
+          "componentId": "meterSimulation"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteBaseLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "update",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteBaseLoadMeter",
+          "properties": {
+            "type": "CONSUMPTION_METERED"
+          }
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteEvLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "update",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteEvLoadMeter",
+          "properties": {
+            "type": "CONSUMPTION_METERED"
+          }
+        }
+      ]
+    }
+  ]
+}

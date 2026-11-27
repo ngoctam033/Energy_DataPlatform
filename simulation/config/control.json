@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "dry_run": false,
+  "max_queue": 10000,
+  "batch_size": 1,
+  "max_inflight": 2,
+  "retention_days": 7
+}

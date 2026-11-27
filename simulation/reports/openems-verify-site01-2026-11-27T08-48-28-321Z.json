@@ -1,0 +1,68 @@
+{
+  "command": "verify",
+  "deploymentId": "energy-lab-4-sites",
+  "createdAt": "2026-11-27T08:48:28.288Z",
+  "sites": [
+    {
+      "edgeId": "site01",
+      "websocketUrl": "ws://127.0.0.1:8185",
+      "actions": [
+        {
+          "kind": "app",
+          "action": "adopt-existing-component",
+          "appId": "App.Api.RestJson.ReadWrite",
+          "controllerId": "ctrlSimulationRest",
+          "reason": "Component already exists; no duplicate App instance is created"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Core.Meta",
+          "componentId": "_meta"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Controller.Api.Backend",
+          "componentId": "ctrlBackend0"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "simulateConsumption"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.GridMeter.Acting",
+          "componentId": "meterSimulation"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteBaseLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteBaseLoadMeter"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteEvLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteEvLoadMeter"
+        }
+      ]
+    }
+  ]
+}

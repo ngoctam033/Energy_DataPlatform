@@ -1,0 +1,367 @@
+{
+  "command": "apply",
+  "deploymentId": "energy-lab-4-sites",
+  "createdAt": "2026-11-27T08:49:34.245Z",
+  "sites": [
+    {
+      "edgeId": "site01",
+      "websocketUrl": "ws://127.0.0.1:8185",
+      "actions": [
+        {
+          "kind": "app",
+          "action": "adopt-existing-component",
+          "appId": "App.Api.RestJson.ReadWrite",
+          "controllerId": "ctrlSimulationRest",
+          "reason": "Component already exists; no duplicate App instance is created"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Core.Meta",
+          "componentId": "_meta"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Controller.Api.Backend",
+          "componentId": "ctrlBackend0"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "simulateConsumption"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.GridMeter.Acting",
+          "componentId": "meterSimulation"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteBaseLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteBaseLoadMeter"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteEvLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteEvLoadMeter"
+        }
+      ]
+    },
+    {
+      "edgeId": "site02",
+      "websocketUrl": "ws://127.0.0.1:8285",
+      "actions": [
+        {
+          "kind": "app",
+          "action": "adopt-existing-component",
+          "appId": "App.Api.RestJson.ReadWrite",
+          "controllerId": "ctrlSimulationRest",
+          "reason": "Component already exists; no duplicate App instance is created"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Core.Meta",
+          "componentId": "_meta"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Controller.Api.Backend",
+          "componentId": "ctrlBackend0"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "simulateConsumption"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.GridMeter.Acting",
+          "componentId": "meterSimulation"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteBaseLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteBaseLoadMeter"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteEvLoadSource"
+        },
+        {
+          "kind": "component",
+          "action": "unchanged",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteEvLoadMeter"
+        }
+      ]
+    },
+    {
+      "edgeId": "site03",
+      "websocketUrl": "ws://127.0.0.1:8385",
+      "actions": [
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Controller.Api.Rest.ReadWrite",
+          "componentId": "ctrlSimulationRest",
+          "properties": {
+            "id": "ctrlSimulationRest",
+            "alias": "Simulation REST API",
+            "enabled": true,
+            "port": 8084,
+            "connectionlimit": 10,
+            "apiTimeout": 86400
+          },
+          "reason": "App Manager JSON-RPC is unavailable on this OpenEMS runtime; using the official Component Manager JSON-RPC"
+        },
+        {
+          "kind": "component",
+          "action": "update",
+          "factoryPid": "Core.Meta",
+          "componentId": "_meta",
+          "properties": {
+            "timezone": "Asia/Ho_Chi_Minh",
+            "placeName": "Energy Lab Site 03",
+            "gridConnectionPointFuseLimit": 2500
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Controller.Api.Backend",
+          "componentId": "ctrlBackend0",
+          "properties": {
+            "id": "ctrlBackend0",
+            "alias": "OpenEMS Backend connection",
+            "enabled": true,
+            "uri": "ws://openems-backend:8081",
+            "apikey": "<redacted>",
+            "apiTimeout": 60,
+            "debugMode": false
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "simulateConsumption",
+          "properties": {
+            "id": "simulateConsumption",
+            "alias": "Grid total power source",
+            "enabled": true,
+            "timeDelta": 1
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.GridMeter.Acting",
+          "componentId": "meterSimulation",
+          "properties": {
+            "id": "meterSimulation",
+            "alias": "Grid connection meter",
+            "enabled": true,
+            "datasource.id": "simulateConsumption"
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteBaseLoadSource",
+          "properties": {
+            "id": "siteBaseLoadSource",
+            "alias": "Site base load source",
+            "enabled": true,
+            "timeDelta": 1
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteBaseLoadMeter",
+          "properties": {
+            "id": "siteBaseLoadMeter",
+            "alias": "Site base load meter",
+            "enabled": true,
+            "datasource.id": "siteBaseLoadSource"
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteEvLoadSource",
+          "properties": {
+            "id": "siteEvLoadSource",
+            "alias": "EV charging load source",
+            "enabled": true,
+            "timeDelta": 1
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteEvLoadMeter",
+          "properties": {
+            "id": "siteEvLoadMeter",
+            "alias": "EV charging load meter",
+            "enabled": true,
+            "datasource.id": "siteEvLoadSource"
+          }
+        }
+      ]
+    },
+    {
+      "edgeId": "site04",
+      "websocketUrl": "ws://127.0.0.1:8485",
+      "actions": [
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Controller.Api.Rest.ReadWrite",
+          "componentId": "ctrlSimulationRest",
+          "properties": {
+            "id": "ctrlSimulationRest",
+            "alias": "Simulation REST API",
+            "enabled": true,
+            "port": 8084,
+            "connectionlimit": 10,
+            "apiTimeout": 86400
+          },
+          "reason": "App Manager JSON-RPC is unavailable on this OpenEMS runtime; using the official Component Manager JSON-RPC"
+        },
+        {
+          "kind": "component",
+          "action": "update",
+          "factoryPid": "Core.Meta",
+          "componentId": "_meta",
+          "properties": {
+            "timezone": "Asia/Ho_Chi_Minh",
+            "placeName": "Energy Lab Site 04",
+            "gridConnectionPointFuseLimit": 2500
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Controller.Api.Backend",
+          "componentId": "ctrlBackend0",
+          "properties": {
+            "id": "ctrlBackend0",
+            "alias": "OpenEMS Backend connection",
+            "enabled": true,
+            "uri": "ws://openems-backend:8081",
+            "apikey": "<redacted>",
+            "apiTimeout": 60,
+            "debugMode": false
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "simulateConsumption",
+          "properties": {
+            "id": "simulateConsumption",
+            "alias": "Grid total power source",
+            "enabled": true,
+            "timeDelta": 1
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.GridMeter.Acting",
+          "componentId": "meterSimulation",
+          "properties": {
+            "id": "meterSimulation",
+            "alias": "Grid connection meter",
+            "enabled": true,
+            "datasource.id": "simulateConsumption"
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteBaseLoadSource",
+          "properties": {
+            "id": "siteBaseLoadSource",
+            "alias": "Site base load source",
+            "enabled": true,
+            "timeDelta": 1
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteBaseLoadMeter",
+          "properties": {
+            "id": "siteBaseLoadMeter",
+            "alias": "Site base load meter",
+            "enabled": true,
+            "datasource.id": "siteBaseLoadSource"
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.Datasource.Single.Channel",
+          "componentId": "siteEvLoadSource",
+          "properties": {
+            "id": "siteEvLoadSource",
+            "alias": "EV charging load source",
+            "enabled": true,
+            "timeDelta": 1
+          }
+        },
+        {
+          "kind": "component",
+          "action": "create",
+          "factoryPid": "Simulator.NRCMeter.Acting",
+          "componentId": "siteEvLoadMeter",
+          "properties": {
+            "id": "siteEvLoadMeter",
+            "alias": "EV charging load meter",
+            "enabled": true,
+            "datasource.id": "siteEvLoadSource"
+          }
+        }
+      ]
+    }
+  ]
+}

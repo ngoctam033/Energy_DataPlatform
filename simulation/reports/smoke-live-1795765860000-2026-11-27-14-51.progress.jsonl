@@ -1,0 +1,16 @@
+{"timestamp":"2026-11-27T07:56:38.181Z","event":"watch_started","run_id":"smoke-live-1795765860000:2026-11-27:14:51","pid":878532}
+{"timestamp":"2026-11-27T07:56:59.482Z","event":"watch_started","run_id":"smoke-live-1795765860000:2026-11-27:14:51","pid":879809}
+{"timestamp":"2026-11-27T07:56:59.489Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":39,"running":58,"stopping":3},"finished":false}
+{"timestamp":"2026-11-27T07:57:29.522Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":45,"running":53,"stopping":2},"finished":false}
+{"timestamp":"2026-11-27T07:57:59.558Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":51,"running":47,"stopping":2},"finished":false}
+{"timestamp":"2026-11-27T07:58:29.599Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":56,"running":41,"stopping":3},"finished":false}
+{"timestamp":"2026-11-27T07:58:59.643Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":61,"running":36,"stopping":3},"finished":false}
+{"timestamp":"2026-11-27T07:59:29.667Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":67,"running":31,"stopping":2},"finished":false}
+{"timestamp":"2026-11-27T07:59:59.714Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":72,"running":25,"stopping":3},"finished":false}
+{"timestamp":"2026-11-27T08:00:29.749Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":77,"running":19,"stopping":4},"finished":false}
+{"timestamp":"2026-11-27T08:00:59.789Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":83,"running":14,"stopping":3},"finished":false}
+{"timestamp":"2026-11-27T08:01:29.826Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":89,"running":9,"stopping":2},"finished":false}
+{"timestamp":"2026-11-27T08:01:59.870Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":94,"running":3,"stopping":3},"finished":false}
+{"timestamp":"2026-11-27T08:02:29.908Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":99,"stopping":1},"finished":false}
+{"timestamp":"2026-11-27T08:02:59.944Z","event":"progress","run_id":"smoke-live-1795765860000:2026-11-27:14:51","total":100,"counts":{"done":100},"finished":true}
+{"timestamp":"2026-11-27T08:03:00.046Z","event":"watch_completed","run_id":"smoke-live-1795765860000:2026-11-27:14:51","acceptance":"FAIL","result_path":"/home/tam/Projects/Energy_DataPlatform/simulation/reports/smoke-live-1795765860000-2026-11-27-14-51.result.json"}

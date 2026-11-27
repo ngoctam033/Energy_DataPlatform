@@ -1,0 +1,290 @@
+[
+  {
+    "id": "sim_orchestrator_v1",
+    "type": "tab",
+    "label": "Simulation Orchestrator",
+    "disabled": false,
+    "info": "Owned by simulation/scripts/build-flows.mjs. Configuration: /simulation. Persistent journal: /data/simulation. Native transports only."
+  },
+  {
+    "id": "sim_tick",
+    "type": "inject",
+    "z": "sim_orchestrator_v1",
+    "name": "Scheduler / dispatcher 1s",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "1",
+    "once": true,
+    "onceDelay": 3,
+    "topic": "tick",
+    "payloadType": "date",
+    "wires": [
+      [
+        "sim_owner"
+      ]
+    ],
+    "x": 510,
+    "y": 100
+  },
+  {
+    "id": "sim_owner",
+    "type": "function",
+    "z": "sim_orchestrator_v1",
+    "name": "State owner / durable intent",
+    "func": "'use strict';\nconst TERMINAL = new Set(['done','failed','expired','cancelled','rejected','dry_run']);\nconst WAITING = new Set(['pending','queued']);\nconst BEHAVIORS = ['NORMAL_CHARGING','EARLY_STOP','TIME_LIMIT_REACHED','CANCEL_BEFORE_START','AUTHORIZATION_FAILED','CHARGING_FAULT'];\nconst idPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;\nfunction assert(ok, message) { if (!ok) throw new Error(message); }\nfunction integer(v, min, max, name) { assert(Number.isInteger(v) && v>=min && v<=max, `Invalid ${name}`); }\nfunction object(v) { return v!==null && typeof v==='object' && !Array.isArray(v); }\nfunction sameKeys(a,b) {return Object.keys(a).sort().join('|')===[...b].sort().join('|');}\nfunction weights(w, allowed, label) {\n  assert(object(w) && Object.keys(w).length>0, `Invalid ${label}`);\n  assert(Object.entries(w).every(([k,v])=>allowed.includes(k)&&Number.isFinite(v)&&v>=0),`Invalid ${label}`);\n  assert(Math.abs(Object.values(w).reduce((a,b)=>a+b,0)-100)<0.000001,`${label} must sum to 100`);\n}\nfunction validateSnapshot(c) {\n  assert(c?.control?.schema_version===1 && c?.registry?.schema_version===1 && c?.targetRegistry?.schema_version===1,'Unsupported schema version');\n  const ctl=c.control, targets=c.targetRegistry.targets;\n  assert(typeof ctl.enabled==='boolean'&&typeof ctl.dry_run==='boolean','Invalid engine switches');\n  integer(ctl.max_queue,1,20000,'max_queue'); integer(ctl.batch_size,1,20,'batch_size'); integer(ctl.retention_days,1,30,'retention_days');\n  if(ctl.max_inflight!==undefined)integer(ctl.max_inflight,1,20,'max_inflight');\n  assert(object(targets),'Invalid targets');\n  const addresses=new Set();\n  for(const [id,t] of Object.entries(targets)) {\n    assert(idPattern.test(id) && object(t),'Invalid target ID');\n    assert(['sap_evse','everest_evse','openems_channel'].includes(t.type),'Unknown target type');\n    assert(typeof t.site==='string'&&idPattern.test(t.site),'Invalid site');\n    let address;\n    if(t.type==='openems_channel') {\n      assert(t.component==='simulateConsumption' && t.meter==='meterSimulation','OpenEMS component not allowlisted');\n      integer(t.value_min_w,0,200000,'min power'); integer(t.value_max_w,t.value_min_w,200000,'max power');\n      address=t.component;\n    } else {\n      assert(/^[A-Za-z0-9_-]{1,64}$/.test(t.station_id),'Invalid station ID');\n      integer(t.connector_id,1,200,'connector'); integer(t.max_power_w,1000,120000,'EVSE power');\n      assert(['AC','DC'].includes(t.charging_type),'Invalid charging type');\n      address=`${t.station_id}:${t.connector_id}`;\n      if(t.type==='everest_evse') assert(t.station_id==='cp001'&&[1,2].includes(t.connector_id)&&t.mqtt_topic_base===`everest_external/nodered/${t.connector_id}/carsim/cmd`,'MQTT target not allowlisted');\n    }\n    assert(!addresses.has(address),'Duplicate physical target');addresses.add(address);\n  }\n  assert(Array.isArray(c.scenarios)&&c.scenarios.length<=64,'Too many scenarios');\n  const ids=new Set();\n  for(const s of c.scenarios) {\n    assert(s.schema_version===1&&idPattern.test(s.id)&&!ids.has(s.id),'Invalid or duplicate scenario ID');ids.add(s.id);\n    assert(typeof s.enabled==='boolean'&&typeof s.name==='string','Invalid scenario');\n    assert(['charging_demand','native_dispatch','power_profile'].includes(s.kind),'Unsupported kind');\n    const q=s.schedule,p=s.parameters;\n    assert(object(q)&&q.type==='daily'&&q.timezone==='Asia/Ho_Chi_Minh','Only daily Asia/Ho_Chi_Minh supported');\n    assert(Array.isArray(q.times)&&q.times.length>0&&q.times.length<=1440&&new Set(q.times).size===q.times.length&&q.times.every(t=>/^([01]\\d|2[0-3]):[0-5]\\d$/.test(t)),'Invalid schedule times');\n    integer(q.catch_up_seconds,0,3600,'catch-up'); assert(object(p),'Invalid parameters');\n    if(s.kind==='charging_demand') {\n      assert(object(p.vehicle_count_by_time)&&sameKeys(p.vehicle_count_by_time,q.times),'Arrival slots mismatch');\n      for(const n of Object.values(p.vehicle_count_by_time))integer(n,0,1000,'vehicle count');\n      assert(object(p.duration_by_time)&&sameKeys(p.duration_by_time,q.times),'Duration slots mismatch');\n      for(const d of Object.values(p.duration_by_time)){integer(d.min,30,10800,'min duration');integer(d.max,d.min,10800,'max duration');}\n      integer(p.seed,0,4294967295,'seed'); integer(p.arrival_window_seconds,1,3600,'arrival window');\n      assert(['uniform','even'].includes(p.arrival_distribution),'Invalid arrival distribution');\n      assert(Array.isArray(p.target_pool)&&p.target_pool.length>0&&new Set(p.target_pool).size===p.target_pool.length&&p.target_pool.every(id=>targets[id]&&targets[id].type!=='openems_channel'),'Unknown/duplicate target');\n      integer(p.max_parallel,1,p.target_pool.length,'max_parallel'); integer(p.max_wait_seconds,1,7200,'max_wait');\n      assert(p.queue_policy==='fifo'&&['queue','reject'].includes(p.on_full),'Unsupported queue policy');\n      weights(p.behaviors,BEHAVIORS,'behaviors');weights(p.site_weights,[...new Set(p.target_pool.map(id=>targets[id].site))],'site weights');weights(p.charging_type_weights,['AC','DC'],'charging type weights');\n      if(p.customer_profiles){\n        assert(object(p.customer_profiles)&&object(p.customer_weights_by_time)&&sameKeys(p.customer_weights_by_time,q.times),'Customer profile slots mismatch');\n        for(const [name,profile]of Object.entries(p.customer_profiles)){\n          assert(/^[A-Z_]+$/.test(name),'Invalid customer profile');integer(profile.battery_wh,10000,200000,'battery');\n          for(const field of ['initial_soc','target_soc']){assert(Array.isArray(profile[field])&&profile[field].length===2,'Invalid SoC range');integer(profile[field][0],0,100,'SoC');integer(profile[field][1],profile[field][0],100,'SoC');}\n          weights(profile.charging_type_weights,['AC','DC'],'profile charging type');\n        }\n        for(const w of Object.values(p.customer_weights_by_time))weights(w,Object.keys(p.customer_profiles),'customer weights');\n      }\n      for(const [site,w] of Object.entries(p.site_weights))for(const [type,tw] of Object.entries(p.charging_type_weights))if(w&&tw)assert(p.target_pool.some(id=>targets[id].site===site&&targets[id].charging_type===type),'No compatible target in site');\n      if(p.target_pool.some(id=>targets[id].type==='everest_evse'))assert(Object.entries(p.behaviors).every(([k,v])=>!v||['NORMAL_CHARGING','EARLY_STOP','TIME_LIMIT_REACHED'].includes(k)),'EVerest behavior not verified');\n    } else if(s.kind==='power_profile') {\n      const t=targets[p.target];assert(t?.type==='openems_channel','Unknown power target');\n      assert(object(p.profile_w)&&sameKeys(p.profile_w,q.times),'Power slots mismatch');\n      for(const v of Object.values(p.profile_w))integer(v,t.value_min_w,t.value_max_w,'power');\n    } else {\n      assert(Array.isArray(p.actions)&&p.actions.length>0&&p.actions.length<=100,'Invalid actions');\n      const actionIds=new Set();\n      for(const a of p.actions) {\n        assert(idPattern.test(a.id)&&!actionIds.has(a.id),'Duplicate action ID');actionIds.add(a.id);\n        integer(a.offset_seconds,0,86400,'offset');assert(targets[a.target],'Unknown action target');\n        if(a.command==='execute_charging_session') {\n          assert(targets[a.target].type==='everest_evse'&&a.transport==='mqtt','Unsupported MQTT target');\n          const match=/^sleep 1;iec_wait_pwr_ready;sleep 1;draw_power_regulated 16,3;sleep (\\d+);unplug$/.exec(a.payload);\n          assert(match,'MQTT grammar not allowlisted');integer(Number(match[1]),30,10800,'native duration');\n        } else {\n          assert(a.command==='set_power_w'&&a.transport==='http'&&targets[a.target].type==='openems_channel','Command not allowlisted');\n          integer(a.payload?.value,targets[a.target].value_min_w,targets[a.target].value_max_w,'power');\n        }\n      }\n    }\n  }\n  return c;\n}\nfunction hash32(s) {let h=2166136261;for(const c of s)h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0;}\nfunction rng32(seed){let x=seed>>>0;return()=>{x=(x+0x6D2B79F5)|0;let t=Math.imul(x^(x>>>15),1|x);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}\nfunction pick(w,rng){let x=rng()*100;for(const [k,v]of Object.entries(w)){x-=v;if(x<0)return k;}return Object.keys(w).at(-1);}\nfunction dueSlots(s, now) {\n  const out=[];\n  for(let at=Math.ceil((now-s.schedule.catch_up_seconds*1000)/60000)*60000;at<=now;at+=60000){\n    const local=new Date(at+7*3600000).toISOString(),date=local.slice(0,10),time=local.slice(11,16);\n    if(s.schedule.times.includes(time))out.push({run_id:`${s.id}:${date}:${time}`,at,time});\n  }return out;\n}\nfunction expand(s,slot,targets) {\n  const base={run_id:slot.run_id,scenario_id:s.id,status:'pending',attempt:0,created_at:slot.at};\n  if(s.kind==='power_profile')return [{...base,job_id:slot.run_id+':power',target:s.parameters.target,target_config:targets[s.parameters.target],due_at:slot.at,expires_at:slot.at+120000,command:'set_power_w',value:s.parameters.profile_w[slot.time]}];\n  if(s.kind==='native_dispatch')return s.parameters.actions.map(a=>({...base,job_id:slot.run_id+':'+a.id,target:a.target,target_config:targets[a.target],due_at:slot.at+a.offset_seconds*1000,expires_at:slot.at+(a.offset_seconds+120)*1000,command:a.command,value:a.payload?.value,payload:a.payload,duration_seconds:a.command==='execute_charging_session'?Number(/sleep (\\d+);unplug$/.exec(a.payload)[1]):undefined}));\n  const p=s.parameters,rng=rng32(hash32(`${p.seed}:${slot.run_id}`)),n=p.vehicle_count_by_time[slot.time],jobs=[];\n  for(let i=0;i<n;i++) {\n    const at=slot.at+Math.floor((p.arrival_distribution==='even'?i/n:rng())*p.arrival_window_seconds)*1000;\n    const d=p.duration_by_time[slot.time],duration=d.min+Math.floor(rng()*(d.max-d.min+1));\n    const behavior=pick(p.behaviors,rng),site=pick(p.site_weights,rng),customer=p.customer_profiles?pick(p.customer_weights_by_time[slot.time],rng):null,profile=p.customer_profiles?.[customer],charging_type=pick(profile?.charging_type_weights||p.charging_type_weights,rng);\n    const targetSoc=profile?profile.target_soc[0]+Math.floor(rng()*(profile.target_soc[1]-profile.target_soc[0]+1)):80+Math.floor(rng()*16);\n    jobs.push({...base,job_id:`${slot.run_id}:vehicle-${String(i+1).padStart(4,'0')}`,due_at:at,expires_at:at+p.max_wait_seconds*1000,duration_seconds:behavior==='EARLY_STOP'?Math.max(30,Math.floor(duration*(0.2+0.5*rng()))):duration,target_soc:targetSoc,customer_profile:customer,planned_battery_wh:profile?.battery_wh,planned_initial_soc_range:profile?.initial_soc,behavior,site,charging_type,\n      target_pool:p.target_pool.filter(id=>targets[id].site===site&&targets[id].charging_type===charging_type),max_parallel:p.max_parallel,on_full:p.on_full});\n  }\n  return jobs.sort((a,b)=>a.due_at-b.due_at||a.job_id.localeCompare(b.job_id));\n}\nfunction newState(){return {version:1,runs:{},jobs:{},reservations:{},events:[],observations:{}};}\nfunction transition(state,j,status,now,detail) {\n  j.status=status;j.updated_at=now;if(detail)j.detail=detail;\n  const e={timestamp:new Date(now).toISOString(),job_id:j.job_id,run_id:j.run_id,scenario_id:j.scenario_id,target:j.target,status,detail};\n  state.events.push(e);if(state.events.length>1000)state.events.shift();\n}\nfunction recover(state,now) {\n  assert(state.version===1&&object(state.jobs)&&object(state.reservations),'Invalid ledger');\n  state.observations={};\n  for(const j of Object.values(state.jobs))if(!WAITING.has(j.status)&&!TERMINAL.has(j.status)){j.request_pending=false;transition(state,j,'unknown',now,'Recovered; reconcile before sending anything');}\n  return state;\n}\nfunction plan(state,c,now) {\n  const enabled=new Set(c.scenarios.filter(s=>s.enabled).map(s=>s.id));\n  for(const j of Object.values(state.jobs))if(WAITING.has(j.status)&&!enabled.has(j.scenario_id))transition(state,j,'cancelled',now,'Scenario disabled or removed');\n  if(!c.control.enabled)return;\n  for(const s of [...c.scenarios].sort((a,b)=>a.id.localeCompare(b.id)))if(s.enabled)for(const slot of dueSlots(s,now)) {\n    if(state.runs[slot.run_id])continue;\n    const jobs=expand(s,slot,c.targetRegistry.targets);\n    if(Object.values(state.jobs).filter(j=>!TERMINAL.has(j.status)).length+jobs.length>c.control.max_queue)throw new Error('Queue capacity exceeded; snapshot not planned');\n    state.runs[slot.run_id]={scenario_id:s.id,at:slot.at,planned_arrivals:jobs.length,revision:c.revision,targets:c.targetRegistry.targets};\n    for(const j of jobs)state.jobs[j.job_id]=j;\n  }\n  const cutoff=now-c.control.retention_days*86400000;\n  for(const [id,j]of Object.entries(state.jobs))if(TERMINAL.has(j.status)&&j.updated_at<cutoff)delete state.jobs[id];\n  for(const [id,r]of Object.entries(state.runs))if(r.at<cutoff&&!Object.values(state.jobs).some(j=>j.run_id===id))delete state.runs[id];\n}\nfunction observe(state,id,obs,now) {\n  state.observations[id]={...state.observations[id],...obs,at:now};\n  const j=state.jobs[state.reservations[id]];if(!j)return;\n  if(!obs.online)return;\n  if(Number.isFinite(obs.energy_wh))j.last_meter_wh=obs.energy_wh;\n  if(obs.active&&obs.transaction_id!=null) {\n    if(j.transaction_id!=null&&String(j.transaction_id)!==String(obs.transaction_id)){transition(state,j,'unknown',now,'Transaction mismatch; target quarantined');return;}\n    if(j.transaction_id==null && obs.started_at && obs.started_at<j.dispatch_at-5000){transition(state,j,'unknown',now,'Existing unrelated transaction');return;}\n    j.transaction_id=obs.transaction_id;\n    if(!j.started_at){j.request_pending=false;j.started_at=obs.started_at||now;j.start_meter_wh=obs.start_meter_wh??obs.energy_wh;j.stop_due_at=j.started_at+j.duration_seconds*1000;}\n    if(['submitted','dispatching','unknown'].includes(j.status))transition(state,j,'running',now,'Simulator confirms CSMS accepted transaction');\n  }\n  if(obs.available&&!obs.active) {\n    if(j.stop_ack&&j.started_at) {transition(state,j,'done',now,'Stop acknowledged and connector available');j.energy_wh=j.csms_energy_wh??obs.session_energy_wh??Math.max(0,(j.last_meter_wh??0)-(j.start_meter_wh??0));delete state.reservations[id];}\n    else if(j.release_ack) {transition(state,j,j.behavior==='AUTHORIZATION_FAILED'?'rejected':'cancelled',now,j.behavior);delete state.reservations[id];}\n    else if(j.started_at&&j.status!=='running') {transition(state,j,'unknown',now,'Available without confirmed stop; operator reconciliation needed');}\n  }\n}\nfunction sapRequest(j, procedure, payload={}) {\n  assert(typeof j.hash_id==='string'&&j.hash_id.length>0,'Missing SAP hash ID');\n  j.request_pending=true;\n  return {kind:'sap',job_id:j.job_id,operation:procedure,method:'POST',url:`http://sap-charging-simulator:8080/ui/0.0.1/${procedure}`,payload:{hashIds:[j.hash_id],...payload}};\n}\nfunction startEffect(j,t,obs) {\n  if(t.type==='openems_channel')return {kind:'openems',job_id:j.job_id,operation:'set_power_w',method:'POST',url:`http://openems-edge:8084/rest/channel/${t.component}/Data`,payload:{value:j.value}};\n  if(t.type==='everest_evse')return {kind:'mqtt',job_id:j.job_id,operation:'execute_charging_session',topic:`${t.mqtt_topic_base}/execute_charging_session`,qos:0,retain:false,payload:j.payload||`sleep 1;iec_wait_pwr_ready;sleep 1;draw_power_regulated 16,3;sleep ${j.duration_seconds};unplug`};\n  j.hash_id=obs.hash_id;\n  if(j.behavior==='AUTHORIZATION_FAILED')return sapRequest(j,'authorize',{idTag:'SIM-INVALID-TAG'});\n  if(j.behavior==='CANCEL_BEFORE_START')return sapRequest(j,'statusNotification',{connectorId:t.connector_id,status:'Preparing',errorCode:'NoError'});\n  return sapRequest(j,'startTransaction',{connectorId:t.connector_id,idTag:'SIM-VALID-TAG'});\n}\nfunction dispatch(state,c,now,brokerOnline=true) {\n  const effects=[];\n  const capacity=Math.max(0,Math.min(c.control.batch_size,(c.control.max_inflight??20)-Object.values(state.jobs).filter(j=>j.request_pending).length));\n  // Ending already-started sessions continues when planning is paused.\n  for(const j of Object.values(state.jobs)) {\n    if(['dispatching','submitted','stopping','releasing','faulting'].includes(j.status)&&now-j.updated_at>45000){j.request_pending=false;transition(state,j,'unknown',now,'Confirmation timeout; no automatic replay');}\n    if(j.status==='running'&&!j.request_pending&&(now>=j.stop_due_at||(j.behavior==='NORMAL_CHARGING'&&j.observed_soc>=j.target_soc))&&j.target_config.type==='sap_evse'&&effects.length<capacity){\n      j.stop_trigger=j.observed_soc>=j.target_soc?'target_soc_reached':j.behavior==='NORMAL_CHARGING'?'time_limit_reached':j.behavior;\n      if(j.behavior==='CHARGING_FAULT'&&!j.fault_sent){j.fault_sent=true;transition(state,j,'faulting',now);effects.push(sapRequest(j,'statusNotification',{connectorId:1,status:'Faulted',errorCode:'GroundFailure'}));}\n      else {transition(state,j,'stopping',now);effects.push(sapRequest(j,'stopTransaction',{transactionId:j.transaction_id,reason:j.behavior==='CHARGING_FAULT'?'Other':'Local'}));}\n    }\n    if(j.status==='releasing'&&j.release_due_at&&now>=j.release_due_at&&!j.release_sent&&effects.length<capacity){j.release_sent=true;effects.push(sapRequest(j,'statusNotification',{connectorId:1,status:'Available',errorCode:'NoError'}));}\n  }\n  if(!c.control.enabled)return effects;\n  for(const j of Object.values(state.jobs).filter(j=>WAITING.has(j.status)).sort((a,b)=>a.due_at-b.due_at||a.job_id.localeCompare(b.job_id))) {\n    if(now<j.due_at)continue;\n    if(now>j.expires_at){transition(state,j,'expired',now);continue;}\n    if(j.status==='pending'){j.arrived_at=now;transition(state,j,'queued',now);}\n    if(effects.length>=capacity)continue;\n    if(c.control.dry_run){transition(state,j,'dry_run',now,'Planned only; no transport output');continue;}\n    const active=Object.values(state.jobs).filter(x=>x.scenario_id===j.scenario_id&&!WAITING.has(x.status)&&!TERMINAL.has(x.status)).length;\n    if(active>=(j.max_parallel||1))continue;\n    const pool=j.target_pool||[j.target];\n    const id=pool.find(id=>{\n      const t=j.target_config||state.runs[j.run_id]?.targets[id],o=state.observations[id];\n      return !state.reservations[id]&&(t.type==='openems_channel'||(o?.online&&o.available&&now-o.at<15000&&(t.type!=='everest_evse'||brokerOnline)));\n    });\n    if(!id){if(j.on_full==='reject')transition(state,j,'rejected',now,'No compatible available EVSE');continue;}\n    j.target=id;j.target_config=j.target_config||state.runs[j.run_id]?.targets[id];\n    state.reservations[id]=j.job_id;j.dispatch_at=now;j.attempt++;j.waiting_seconds=(now-j.due_at)/1000;\n    transition(state,j,'submitted',now,'Intent persisted before transport; not operation success');\n    effects.push(startEffect(j,j.target_config,state.observations[id]));\n  }\n  return effects;\n}\nfunction httpResult(state,e,now) {\n  const j=state.jobs[e.job_id];if(!j)return [];\n  j.request_pending=false;\n  const ok=e.statusCode>=200&&e.statusCode<300;\n  const body=e.payload;\n  if(e.kind==='openems') {\n    if(!ok||body?.error){transition(state,j,'unknown',now,'OpenEMS API failed; read-back required');return [];}\n    if(e.operation==='set_power_w') {\n      j.read_after=now+2500;\n      return [];\n    }\n    const value=body?.value;\n    if(Number(value)===j.value){transition(state,j,'done',now,'OpenEMS meter read-back matches');delete state.reservations[j.target];}\n    else transition(state,j,'unknown',now,'OpenEMS read-back mismatch');\n    return [];\n  }\n  if(e.operation==='authorize'&&/\"status\":\"(?:Invalid|Blocked|Expired|Rejected)\"/.test(JSON.stringify(body))) {\n    j.release_ack=true;j.release_due_at=now;transition(state,j,'releasing',now,'Authorization rejection confirmed by CSMS');return [];\n  }\n  if(!ok||body?.status!=='success'||body.hashIdsFailed?.length){transition(state,j,'unknown',now,'SAP request failed; target held for reconciliation');return [];}\n  if(e.operation==='stopTransaction'){j.stop_ack=true;return [];}\n  if(e.operation==='authorize'){\n    const encoded=JSON.stringify(body);\n    if(!/Invalid|Blocked|Expired|Rejected/.test(encoded)){transition(state,j,'unknown',now,'Expected invalid token was not confirmed rejected');return [];}\n    j.release_ack=true;j.release_due_at=now;transition(state,j,'releasing',now);return [];\n  }\n  if(e.operation==='statusNotification') {\n    if(j.status==='faulting'){j.stop_due_at=now;transition(state,j,'running',now,'Fault status acknowledged');}\n    else if(j.release_sent){j.release_ack=true;}\n    else {j.release_due_at=now+3000;transition(state,j,'releasing',now);}\n  }\n  return [];\n}\nfunction kpis(state) {\n  const jobs=Object.values(state.jobs),counts={};for(const j of jobs)counts[j.status]=(counts[j.status]||0)+1;\n  const waits=jobs.filter(j=>Number.isFinite(j.waiting_seconds)).map(j=>j.waiting_seconds).sort((a,b)=>a-b);\n  return {planned_arrivals:jobs.length,arrived:jobs.filter(j=>j.arrived_at||j.dispatch_at).length,dispatched:jobs.filter(j=>j.dispatch_at).length,confirmed_started:jobs.filter(j=>j.started_at).length,confirmed_finished:counts.done||0,counts,reservations:Object.keys(state.reservations).length,waiting_p50:waits.length?waits[Math.floor((waits.length-1)*0.5)]:null,waiting_p95:waits.length?waits[Math.floor((waits.length-1)*0.95)]:null};\n}\n\n// The builder prepends engine.cjs here. All events pass through this one owner.\nconst io=global.get('simulationIO');\nif(!io){node.error('simulationIO is unavailable; prepare settings before deploying');return null;}\n// Subscribe to native API state, not the noisy dashboard meter channel fan-out.\nif(!msg.kind&&!msg.status&&msg.topic!=='tick'&&!/^everest_api\\/(evse_manager_[12]\\/var\\/session_info|ocpp\\/var\\/connection_status)$/.test(msg.topic||''))return null;\nconst count=context.get('pendingCount')||0;\nif(count>500){node.error('Simulation event backlog exceeded; dispatch halted');context.set('halted',true);return null;}\ncontext.set('pendingCount',count+1);\nconst previous=context.get('tail')||Promise.resolve();\nconst task=previous.then(async()=>{\n  const now=Date.now();\n  let cache=context.get('cache');\n  if(!cache)cache={states:{},config:null,loadedAt:0,broker:false,valid:false};\n  if(msg.topic==='tick'&&now-cache.loadedAt>=15000) {\n    cache.loadedAt=now;\n    try {cache.config=validateSnapshot(await io.loadConfig());cache.valid=true;cache.error=null;}\n    catch(e){cache.valid=false;cache.error=e.message;node.warn('Simulation configuration rejected: '+e.message);}\n  }\n  if(!cache.config){context.set('cache',cache);return;}\n  const mode=cache.config.control.dry_run?'dry':'live';\n  if(!cache.states[mode])cache.states[mode]=recover(await io.loadState(mode)||newState(),now);\n  // Continue reconciling the live ledger while the operator selects dry-run.\n  if(!cache.states.live)cache.states.live=recover(await io.loadState('live')||newState(),now);\n  const live=cache.states.live, state=cache.states[mode],eventsBefore=new Set([...live.events,...state.events].map(e=>JSON.stringify(e)));\n  let effects=[];\n  if(msg.status)cache.broker=msg.status.text==='node-red:common.status.connected'||msg.status.text==='connected';\n  if(msg.kind==='csms_poll') {\n    if(msg.statusCode===200&&!msg.payload?.errors)for(const tx of msg.payload?.data?.Transactions||[]) {\n      const j=Object.values(live.jobs).find(j=>j.target_config?.station_id===tx.ChargingStation.ocppConnectionName&&j.dispatch_at&&Date.parse(tx.startTime)>=j.dispatch_at-5000&&\n        (j.transaction_id!=null?String(j.transaction_id)===String(tx.transactionId):j.target_config.type==='everest_evse'&&Date.parse(tx.startTime)<=j.dispatch_at+60000));\n      if(!j)continue;\n      j.csms_confirmed=true;\n      if(j.target_config.type==='everest_evse'){\n        j.transaction_id=tx.transactionId;\n        if(!j.started_at){j.started_at=Date.parse(tx.startTime);transition(live,j,'running',now,'CSMS confirms EVerest transaction');}\n      }\n      if(tx.endTime&&!tx.isActive){j.stop_ack=true;j.csms_end_at=Date.parse(tx.endTime);j.csms_energy_wh=tx.totalKwh==null?null:Number(tx.totalKwh)*1000;}\n      const meter=tx.MeterValues?.[0];\n      if(meter&&Math.abs(now-Date.parse(meter.timestamp))<60000) {\n        const soc=meter.sampledValue.find(v=>v.measurand==='SoC');\n        if(soc){j.observed_soc=Number(soc.value);j.first_observed_soc??=j.observed_soc;}\n      }\n    }\n  } else if(msg.kind==='sap_poll') {\n    if(msg.statusCode===200&&msg.payload?.status==='success'&&Array.isArray(msg.payload.chargingStations)) {\n      const byStation=Object.fromEntries(Object.entries(cache.config.targetRegistry.targets).filter(([,t])=>t.type==='sap_evse').map(([id,t])=>[t.station_id,id]));\n      for(const s of msg.payload.chargingStations) {\n        const id=byStation[s.stationInfo?.chargingStationId];if(!id)continue;\n        const t=cache.config.targetRegistry.targets[id],con=s.connectors?.find(c=>c.connectorId===t.connector_id)?.connectorStatus;if(!con)continue;\n        observe(live,id,{online:s.wsState===1&&s.bootNotificationResponse?.status==='Accepted',available:con.status==='Available'&&!con.transactionStarted&&!con.transactionStarting&&!con.transactionPending&&!con.transactionEnding,active:con.transactionStarted===true,transaction_id:con.transactionId,started_at:con.transactionStart?Date.parse(con.transactionStart):null,energy_wh:con.energyActiveImportRegisterValue,start_meter_wh:con.transactionBeginMeterValue?.sampledValue?.find(v=>v.measurand==='Energy.Active.Import.Register'||!v.measurand)?.value,hash_id:s.stationInfo.hashId,status:con.status},now);\n      }\n    }\n  } else if(msg.kind==='sap'||msg.kind==='openems')effects.push(...httpResult(live,msg,now));\n  else if(msg.topic==='everest_api/ocpp/var/connection_status'&&!msg.retain){cache.everestConnected=String(msg.payload)==='connected';cache.everestAt=now;cache.broker=true;}\n  else if(msg.topic?.startsWith('everest_api/evse_manager_')&&!msg.retain) {\n    const m=/^everest_api\\/evse_manager_([12])\\/var\\/session_info$/.exec(msg.topic);\n    if(m){const p=typeof msg.payload==='object'?msg.payload:JSON.parse(msg.payload),id='everest-'+m[1];\n      if(Math.abs(now-Date.parse(p.datetime))<15000){\n        const online=cache.everestConnected&&now-cache.everestAt<15000&&!p.permanent_fault;\n        observe(live,id,{online,available:p.state==='Unplugged',active:p.state==='Charging',status:p.state,session_energy_wh:p.charged_energy_wh},now);\n        const j=live.jobs[live.reservations[id]];\n        if(j&&online&&cache.broker&&p.state==='AuthRequired'&&!j.auth_sent&&now-j.dispatch_at<45000){\n          j.auth_sent=true;effects.push({kind:'mqtt',job_id:j.job_id,topic:'everest_api/dummy_token_provider/cmd/provide',qos:0,retain:false,payload:JSON.stringify({id_token:{value:'A1B2C3D4',type:'ISO14443'},authorization_type:'RFID',prevalidated:false,connectors:[Number(m[1])]})});\n        }\n      }\n    }\n  }\n  if(msg.topic==='tick') {\n    if(cache.valid&&!context.get('halted')) {\n      // Copy planning so a queue overflow cannot commit half a configuration.\n      const draft=JSON.parse(JSON.stringify(state));\n      plan(draft,cache.config,now);\n      Object.assign(state,draft);\n      effects.push(...dispatch(state,cache.config,now,cache.broker));\n    }\n    // Invalid config stops new starts but does not abandon already running sessions.\n    if(mode==='dry'||!cache.valid||context.get('halted'))effects.push(...dispatch(live,{control:{enabled:false,batch_size:1,max_inflight:1}},now,cache.broker));\n    for(const j of Object.values(live.jobs))if(j.read_after&&now>=j.read_after&&!j.read_sent){j.read_sent=true;effects.push({kind:'openems',job_id:j.job_id,operation:'read_power_w',method:'GET',url:'http://openems-edge:8084/rest/channel/'+j.target_config.meter+'/ActivePower'});}\n  }\n  if(effects.some(e=>e.kind==='mqtt')&&!cache.broker)throw new Error('MQTT offline before handoff');\n  // fsync + atomic rename BEFORE any native node receives a command.\n  await io.saveState('live',live);if(mode==='dry')await io.saveState('dry',state);\n  const events=[...live.events,...(mode==='dry'?state.events:[])].filter(e=>!eventsBefore.has(JSON.stringify(e)));\n  await io.audit(events);\n  if(msg.topic==='tick') {\n    const report={timestamp:new Date(now).toISOString(),mode,enabled:cache.config.control.enabled,valid:cache.valid,halted:!!context.get('halted'),error:cache.error,revision:cache.config.revision,kpis:kpis(state),live_kpis:kpis(live),targets:live.observations};\n    await io.status(report);\n    node.status({fill:cache.valid?'green':'red',shape:'dot',text:`${mode} | ${report.live_kpis.confirmed_started} started | ${report.live_kpis.reservations} reserved`});\n  }\n  context.set('cache',cache);\n  for(const e of effects) {\n    if(e.kind==='mqtt')node.send([e,null,null]);\n    else {\n      const user=env.get(e.kind==='sap'?'SIM_SAP_USER':'SIM_OPENEMS_USER'),password=env.get(e.kind==='sap'?'SIM_SAP_PASSWORD':'SIM_OPENEMS_PASSWORD');\n      if(!user||!password)throw new Error('Missing transport credential');\n      e.headers={'Content-Type':'application/json',Authorization:'Basic '+Buffer.from(user+':'+password).toString('base64')};e.requestTimeout=35000;\n      node.send([null,e,null]);\n    }\n  }\n}).catch(e=>{context.set('halted',true);node.error('Simulation halted: '+e.message);}).finally(()=>{context.set('pendingCount',(context.get('pendingCount')||1)-1);node.done();});\ncontext.set('tail',task);\nreturn null;\n",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "context.set('halted',false);context.set('pendingCount',0);context.set('cache',null);context.set('tail',null);",
+    "finalize": "",
+    "libs": [],
+    "wires": [
+      [
+        "sim_mqtt_out"
+      ],
+      [
+        "sim_http"
+      ],
+      [
+        "sim_debug"
+      ]
+    ],
+    "x": 840,
+    "y": 100
+  },
+  {
+    "id": "sim_mqtt_in",
+    "type": "mqtt in",
+    "z": "sim_orchestrator_v1",
+    "name": "EVerest periodic session state",
+    "topic": "everest_api/+/var/session_info",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "fc8686af.48d178",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "wires": [
+      [
+        "sim_owner"
+      ]
+    ],
+    "x": 180,
+    "y": 220
+  },
+  {
+    "id": "sim_mqtt_connection",
+    "type": "mqtt in",
+    "z": "sim_orchestrator_v1",
+    "name": "EVerest OCPP connection",
+    "topic": "everest_api/ocpp/var/connection_status",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "fc8686af.48d178",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "wires": [
+      [
+        "sim_owner"
+      ]
+    ],
+    "x": 510,
+    "y": 220
+  },
+  {
+    "id": "sim_mqtt_out",
+    "type": "mqtt out",
+    "z": "sim_orchestrator_v1",
+    "name": "EVerest native command (no retained/offline queue)",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "fc8686af.48d178",
+    "wires": [],
+    "x": 840,
+    "y": 220
+  },
+  {
+    "id": "sim_broker_status",
+    "type": "status",
+    "z": "sim_orchestrator_v1",
+    "name": "MQTT connection",
+    "scope": [
+      "sim_mqtt_out"
+    ],
+    "wires": [
+      [
+        "sim_owner"
+      ]
+    ],
+    "x": 180,
+    "y": 340
+  },
+  {
+    "id": "sim_http",
+    "type": "http request",
+    "z": "sim_orchestrator_v1",
+    "name": "Native SAP / OpenEMS request",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "persist": false,
+    "authType": "",
+    "senderr": false,
+    "wires": [
+      [
+        "sim_strip_headers"
+      ]
+    ],
+    "x": 510,
+    "y": 340
+  },
+  {
+    "id": "sim_strip_headers",
+    "type": "function",
+    "z": "sim_orchestrator_v1",
+    "name": "Remove credentials before ledger",
+    "func": "delete msg.headers; return msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      [
+        "sim_owner"
+      ]
+    ],
+    "x": 840,
+    "y": 340
+  },
+  {
+    "id": "sim_poll",
+    "type": "inject",
+    "z": "sim_orchestrator_v1",
+    "name": "Observe SAP every 5s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "once": true,
+    "onceDelay": 4,
+    "payloadType": "date",
+    "wires": [
+      [
+        "sim_poll_request"
+      ]
+    ],
+    "x": 180,
+    "y": 460
+  },
+  {
+    "id": "sim_csms_poll",
+    "type": "inject",
+    "z": "sim_orchestrator_v1",
+    "name": "Observe actual CSMS SoC every 15s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "15",
+    "once": true,
+    "onceDelay": 7,
+    "payloadType": "date",
+    "wires": [
+      [
+        "sim_csms_request"
+      ]
+    ],
+    "x": 510,
+    "y": 460
+  },
+  {
+    "id": "sim_csms_request",
+    "type": "function",
+    "z": "sim_orchestrator_v1",
+    "name": "Read transaction meters through GraphQL",
+    "func": "msg.kind='csms_poll';msg.method='POST';msg.url='http://graphql-engine:8080/v1/graphql';msg.headers={'Content-Type':'application/json'};if(env.get('HASURA_ADMIN_SECRET'))msg.headers['x-hasura-admin-secret']=env.get('HASURA_ADMIN_SECRET');msg.payload={query:\"query SimulationObservation($since:timestamptz!) {\\n  Transactions(where:{_and:[{_or:[{isActive:{_eq:true}},{startTime:{_gte:$since}}]},{ChargingStation:{_or:[{ocppConnectionName:{_like:\\\"SIM-S%\\\"}},{ocppConnectionName:{_eq:\\\"cp001\\\"}}]}}]},order_by:{createdAt:desc},limit:1000) {\\n    transactionId isActive startTime endTime totalKwh\\n    ChargingStation { ocppConnectionName }\\n    Evse { evseId }\\n    MeterValues(order_by:{timestamp:desc},limit:1) { timestamp sampledValue }\\n  }\\n}\\n\",variables:{since:new Date(Date.now()-10800000).toISOString()}};msg.requestTimeout=10000;return msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      [
+        "sim_http"
+      ]
+    ],
+    "x": 840,
+    "y": 460
+  },
+  {
+    "id": "sim_poll_request",
+    "type": "function",
+    "z": "sim_orchestrator_v1",
+    "name": "SAP read-only snapshot",
+    "func": "msg.kind='sap_poll';msg.method='POST';msg.url='http://sap-charging-simulator:8080/ui/0.0.1/listChargingStations';msg.payload={};msg.headers={'Content-Type':'application/json',Authorization:'Basic '+Buffer.from(env.get('SIM_SAP_USER')+':'+env.get('SIM_SAP_PASSWORD')).toString('base64')};msg.requestTimeout=4000;return msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      [
+        "sim_http"
+      ]
+    ],
+    "x": 180,
+    "y": 580
+  },
+  {
+    "id": "sim_catch",
+    "type": "catch",
+    "z": "sim_orchestrator_v1",
+    "name": "Transport errors",
+    "scope": [
+      "sim_http",
+      "sim_poll_request"
+    ],
+    "uncaught": false,
+    "wires": [
+      [
+        "sim_transport_error"
+      ]
+    ],
+    "x": 510,
+    "y": 580
+  },
+  {
+    "id": "sim_transport_error",
+    "type": "function",
+    "z": "sim_orchestrator_v1",
+    "name": "Timeout is uncertain, never replay",
+    "func": "delete msg.headers;msg.statusCode=0;msg.payload={};return msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      [
+        "sim_owner"
+      ]
+    ],
+    "x": 840,
+    "y": 580
+  },
+  {
+    "id": "sim_debug",
+    "type": "debug",
+    "z": "sim_orchestrator_v1",
+    "name": "Orchestrator diagnostics",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "wires": [],
+    "x": 180,
+    "y": 700
+  }
+]

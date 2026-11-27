@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "factory-daily-load",
+  "name": "Factory consumption profile",
+  "enabled": false,
+  "kind": "power_profile",
+  "schedule": {
+    "timezone": "Asia/Ho_Chi_Minh",
+    "type": "daily",
+    "times": [
+      "08:00",
+      "10:00",
+      "12:00",
+      "18:00",
+      "22:00"
+    ],
+    "catch_up_seconds": 120
+  },
+  "parameters": {
+    "target": "factory-load",
+    "profile_w": {
+      "08:00": 50000,
+      "10:00": 120000,
+      "12:00": 80000,
+      "18:00": 150000,
+      "22:00": 30000
+    }
+  }
+}

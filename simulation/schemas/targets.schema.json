@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Deployment target registry; native endpoint allowlist is enforced by engine.cjs",
+  "type": "object", "required": ["schema_version", "targets"], "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1},
+    "targets": {"type": "object", "propertyNames": {"pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"}, "additionalProperties": {
+      "type": "object", "required": ["type", "site"],
+      "properties": {"type": {"enum": ["sap_evse", "everest_evse", "openems_channel"]}, "site": {"type": "string"}, "station_id": {"type": "string"}, "connector_id": {"type": "integer", "minimum": 1}, "max_power_w": {"type": "integer", "minimum": 1000, "maximum": 120000}, "charging_type": {"enum": ["AC", "DC"]}}
+    }}
+  }
+}

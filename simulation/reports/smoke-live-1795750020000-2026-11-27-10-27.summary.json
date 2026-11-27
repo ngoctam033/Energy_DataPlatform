@@ -1,0 +1,39 @@
+{
+  "captured_at": "2026-11-27T07:49:43.336Z",
+  "run_id": "smoke-live-1795750020000:2026-11-27:10:27",
+  "planned": 100,
+  "kpis": {
+    "planned_arrivals": 100,
+    "arrived": 100,
+    "dispatched": 33,
+    "confirmed_started": 33,
+    "confirmed_finished": 33,
+    "counts": {
+      "done": 33,
+      "queued": 67
+    },
+    "reservations": 0,
+    "waiting_p50": 0.908,
+    "waiting_p95": 2.893
+  },
+  "csms_matched": 33,
+  "csms_ended": 33,
+  "meter_samples": 8275,
+  "total_kwh": 283.528,
+  "acceptance": "FAIL",
+  "physical_checks": "FAIL",
+  "issues": [
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0063: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0084: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0047: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0065: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0045: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0071: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0090: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0013: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0092: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0017: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0042: session exceeded planned duration tolerance",
+    "smoke-live-1795750020000:2026-11-27:10:27:vehicle-0083: session exceeded planned duration tolerance"
+  ]
+}

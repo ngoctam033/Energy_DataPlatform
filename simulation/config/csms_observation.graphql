@@ -1,0 +1,8 @@
+query SimulationObservation($since:timestamptz!) {
+  Transactions(where:{_and:[{_or:[{isActive:{_eq:true}},{startTime:{_gte:$since}}]},{ChargingStation:{_or:[{ocppConnectionName:{_like:"SIM-S%"}},{ocppConnectionName:{_eq:"cp001"}}]}}]},order_by:{createdAt:desc},limit:1000) {
+    transactionId isActive startTime endTime totalKwh
+    ChargingStation { ocppConnectionName }
+    Evse { evseId }
+    MeterValues(order_by:{timestamp:desc},limit:1) { timestamp sampledValue }
+  }
+}

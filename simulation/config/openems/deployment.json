@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "deploymentId": "energy-lab-4-sites",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "backend": {
+    "edgeWebsocketUri": "ws://openems-backend:8081",
+    "metadataRuntimePath": "simulation/.runtime/openems/backend-metadata.json"
+  },
+  "sites": [
+    {
+      "edgeId": "site01",
+      "name": "Energy Lab Site 01",
+      "stationPrefix": "SITE01",
+      "websocketUrl": "ws://127.0.0.1:8185",
+      "passwordEnv": "OPENEMS_SITE01_PASSWORD",
+      "apiKeyEnv": "OPENEMS_SITE01_API_KEY",
+      "gridLimitW": 1625000,
+      "fleet": { "ac7": 10, "ac22": 10, "dc60": 20, "dc120": 10 }
+    },
+    {
+      "edgeId": "site02",
+      "name": "Energy Lab Site 02",
+      "stationPrefix": "SITE02",
+      "websocketUrl": "ws://127.0.0.1:8285",
+      "passwordEnv": "OPENEMS_SITE02_PASSWORD",
+      "apiKeyEnv": "OPENEMS_SITE02_API_KEY",
+      "gridLimitW": 1625000,
+      "fleet": { "ac7": 10, "ac22": 10, "dc60": 20, "dc120": 10 }
+    },
+    {
+      "edgeId": "site03",
+      "name": "Energy Lab Site 03",
+      "stationPrefix": "SITE03",
+      "websocketUrl": "ws://127.0.0.1:8385",
+      "passwordEnv": "OPENEMS_SITE03_PASSWORD",
+      "apiKeyEnv": "OPENEMS_SITE03_API_KEY",
+      "gridLimitW": 1625000,
+      "fleet": { "ac7": 10, "ac22": 10, "dc60": 20, "dc120": 10 }
+    },
+    {
+      "edgeId": "site04",
+      "name": "Energy Lab Site 04",
+      "stationPrefix": "SITE04",
+      "websocketUrl": "ws://127.0.0.1:8485",
+      "passwordEnv": "OPENEMS_SITE04_PASSWORD",
+      "apiKeyEnv": "OPENEMS_SITE04_API_KEY",
+      "gridLimitW": 1625000,
+      "fleet": { "ac7": 10, "ac22": 10, "dc60": 20, "dc120": 10 }
+    }
+  ],
+  "apps": [
+    {
+      "appId": "App.Api.RestJson.ReadWrite",
+      "alias": "Simulation REST API",
+      "properties": { "CONTROLLER_ID": "ctrlSimulationRest", "API_TIMEOUT": 86400 },
+      "componentFallback": {
+        "factoryPid": "Controller.Api.Rest.ReadWrite",
+        "properties": {
+          "id": "ctrlSimulationRest",
+          "alias": "Simulation REST API",
+          "enabled": true,
+          "port": 8084,
+          "connectionlimit": 10,
+          "apiTimeout": 86400
+        }
+      }
+    }
+  ],
+  "components": [
+    {
+      "factoryPid": "Core.Meta",
+      "componentId": "_meta",
+      "updateOnly": true,
+      "properties": {
+        "timezone": "$timezone",
+        "placeName": "$site.name",
+        "gridConnectionPointFuseLimit": 2500
+      }
+    },
+    {
+      "factoryPid": "Controller.Api.Backend",
+      "properties": {
+        "id": "ctrlBackend0",
+        "alias": "OpenEMS Backend connection",
+        "enabled": true,
+        "uri": "$backend.edgeWebsocketUri",
+        "apikey": "$site.apiKey",
+        "apiTimeout": 60,
+        "debugMode": false
+      }
+    },
+    {
+      "factoryPid": "Simulator.Datasource.Single.Channel",
+      "properties": { "id": "simulateConsumption", "alias": "Grid total power source", "enabled": true, "timeDelta": 1 }
+    },
+    {
+      "factoryPid": "Simulator.GridMeter.Acting",
+      "properties": { "id": "meterSimulation", "alias": "Grid connection meter", "enabled": true, "datasource.id": "simulateConsumption" }
+    },
+    {
+      "factoryPid": "Simulator.Datasource.Single.Channel",
+      "properties": { "id": "siteBaseLoadSource", "alias": "Site base load source", "enabled": true, "timeDelta": 1 }
+    },
+    {
+      "factoryPid": "Simulator.NRCMeter.Acting",
+      "properties": { "id": "siteBaseLoadMeter", "alias": "Site base load meter", "enabled": true, "datasource.id": "siteBaseLoadSource" }
+    },
+    {
+      "factoryPid": "Simulator.Datasource.Single.Channel",
+      "properties": { "id": "siteEvLoadSource", "alias": "EV charging load source", "enabled": true, "timeDelta": 1 }
+    },
+    {
+      "factoryPid": "Simulator.NRCMeter.Acting",
+      "properties": { "id": "siteEvLoadMeter", "alias": "EV charging load meter", "enabled": true, "datasource.id": "siteEvLoadSource" }
+    }
+  ],
+  "channels": {
+    "gridActivePower": "meterSimulation/ActivePower",
+    "siteBaseLoad": "siteBaseLoadMeter/ActivePower",
+    "evChargingLoad": "siteEvLoadMeter/ActivePower"
+  }
+}

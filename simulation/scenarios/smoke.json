@@ -1,0 +1,345 @@
+{
+  "schema_version": 1,
+  "id": "smoke-live-1795765860000",
+  "name": "Bounded commissioning run",
+  "enabled": true,
+  "kind": "charging_demand",
+  "schedule": {
+    "timezone": "Asia/Ho_Chi_Minh",
+    "type": "daily",
+    "times": [
+      "14:51"
+    ],
+    "catch_up_seconds": 120
+  },
+  "parameters": {
+    "vehicle_count_by_time": {
+      "14:51": 100
+    },
+    "duration_by_time": {
+      "14:51": {
+        "min": 60,
+        "max": 75
+      }
+    },
+    "arrival_window_seconds": 200,
+    "arrival_distribution": "uniform",
+    "seed": 42,
+    "target_pool": [
+      "sim-s1-ac7-00001",
+      "sim-s1-ac7-00002",
+      "sim-s1-ac7-00003",
+      "sim-s1-ac7-00004",
+      "sim-s1-ac7-00005",
+      "sim-s1-ac7-00006",
+      "sim-s1-ac7-00007",
+      "sim-s1-ac7-00008",
+      "sim-s1-ac7-00009",
+      "sim-s1-ac7-00010",
+      "sim-s1-ac22-00001",
+      "sim-s1-ac22-00002",
+      "sim-s1-ac22-00003",
+      "sim-s1-ac22-00004",
+      "sim-s1-ac22-00005",
+      "sim-s1-ac22-00006",
+      "sim-s1-ac22-00007",
+      "sim-s1-ac22-00008",
+      "sim-s1-ac22-00009",
+      "sim-s1-ac22-00010",
+      "sim-s1-dc60-00001",
+      "sim-s1-dc60-00002",
+      "sim-s1-dc60-00003",
+      "sim-s1-dc60-00004",
+      "sim-s1-dc60-00005",
+      "sim-s1-dc60-00006",
+      "sim-s1-dc60-00007",
+      "sim-s1-dc60-00008",
+      "sim-s1-dc60-00009",
+      "sim-s1-dc60-00010",
+      "sim-s1-dc60-00011",
+      "sim-s1-dc60-00012",
+      "sim-s1-dc60-00013",
+      "sim-s1-dc60-00014",
+      "sim-s1-dc60-00015",
+      "sim-s1-dc60-00016",
+      "sim-s1-dc60-00017",
+      "sim-s1-dc60-00018",
+      "sim-s1-dc60-00019",
+      "sim-s1-dc60-00020",
+      "sim-s1-dc120-00001",
+      "sim-s1-dc120-00002",
+      "sim-s1-dc120-00003",
+      "sim-s1-dc120-00004",
+      "sim-s1-dc120-00005",
+      "sim-s1-dc120-00006",
+      "sim-s1-dc120-00007",
+      "sim-s1-dc120-00008",
+      "sim-s1-dc120-00009",
+      "sim-s1-dc120-00010",
+      "sim-s2-ac7-00001",
+      "sim-s2-ac7-00002",
+      "sim-s2-ac7-00003",
+      "sim-s2-ac7-00004",
+      "sim-s2-ac7-00005",
+      "sim-s2-ac7-00006",
+      "sim-s2-ac7-00007",
+      "sim-s2-ac7-00008",
+      "sim-s2-ac7-00009",
+      "sim-s2-ac7-00010",
+      "sim-s2-ac22-00001",
+      "sim-s2-ac22-00002",
+      "sim-s2-ac22-00003",
+      "sim-s2-ac22-00004",
+      "sim-s2-ac22-00005",
+      "sim-s2-ac22-00006",
+      "sim-s2-ac22-00007",
+      "sim-s2-ac22-00008",
+      "sim-s2-ac22-00009",
+      "sim-s2-ac22-00010",
+      "sim-s2-dc60-00001",
+      "sim-s2-dc60-00002",
+      "sim-s2-dc60-00003",
+      "sim-s2-dc60-00004",
+      "sim-s2-dc60-00005",
+      "sim-s2-dc60-00006",
+      "sim-s2-dc60-00007",
+      "sim-s2-dc60-00008",
+      "sim-s2-dc60-00009",
+      "sim-s2-dc60-00010",
+      "sim-s2-dc60-00011",
+      "sim-s2-dc60-00012",
+      "sim-s2-dc60-00013",
+      "sim-s2-dc60-00014",
+      "sim-s2-dc60-00015",
+      "sim-s2-dc60-00016",
+      "sim-s2-dc60-00017",
+      "sim-s2-dc60-00018",
+      "sim-s2-dc60-00019",
+      "sim-s2-dc60-00020",
+      "sim-s2-dc120-00001",
+      "sim-s2-dc120-00002",
+      "sim-s2-dc120-00003",
+      "sim-s2-dc120-00004",
+      "sim-s2-dc120-00005",
+      "sim-s2-dc120-00006",
+      "sim-s2-dc120-00007",
+      "sim-s2-dc120-00008",
+      "sim-s2-dc120-00009",
+      "sim-s2-dc120-00010",
+      "sim-s3-ac7-00001",
+      "sim-s3-ac7-00002",
+      "sim-s3-ac7-00003",
+      "sim-s3-ac7-00004",
+      "sim-s3-ac7-00005",
+      "sim-s3-ac7-00006",
+      "sim-s3-ac7-00007",
+      "sim-s3-ac7-00008",
+      "sim-s3-ac7-00009",
+      "sim-s3-ac7-00010",
+      "sim-s3-ac22-00001",
+      "sim-s3-ac22-00002",
+      "sim-s3-ac22-00003",
+      "sim-s3-ac22-00004",
+      "sim-s3-ac22-00005",
+      "sim-s3-ac22-00006",
+      "sim-s3-ac22-00007",
+      "sim-s3-ac22-00008",
+      "sim-s3-ac22-00009",
+      "sim-s3-ac22-00010",
+      "sim-s3-dc60-00001",
+      "sim-s3-dc60-00002",
+      "sim-s3-dc60-00003",
+      "sim-s3-dc60-00004",
+      "sim-s3-dc60-00005",
+      "sim-s3-dc60-00006",
+      "sim-s3-dc60-00007",
+      "sim-s3-dc60-00008",
+      "sim-s3-dc60-00009",
+      "sim-s3-dc60-00010",
+      "sim-s3-dc60-00011",
+      "sim-s3-dc60-00012",
+      "sim-s3-dc60-00013",
+      "sim-s3-dc60-00014",
+      "sim-s3-dc60-00015",
+      "sim-s3-dc60-00016",
+      "sim-s3-dc60-00017",
+      "sim-s3-dc60-00018",
+      "sim-s3-dc60-00019",
+      "sim-s3-dc60-00020",
+      "sim-s3-dc120-00001",
+      "sim-s3-dc120-00002",
+      "sim-s3-dc120-00003",
+      "sim-s3-dc120-00004",
+      "sim-s3-dc120-00005",
+      "sim-s3-dc120-00006",
+      "sim-s3-dc120-00007",
+      "sim-s3-dc120-00008",
+      "sim-s3-dc120-00009",
+      "sim-s3-dc120-00010",
+      "sim-s4-ac7-00001",
+      "sim-s4-ac7-00002",
+      "sim-s4-ac7-00003",
+      "sim-s4-ac7-00004",
+      "sim-s4-ac7-00005",
+      "sim-s4-ac7-00006",
+      "sim-s4-ac7-00007",
+      "sim-s4-ac7-00008",
+      "sim-s4-ac7-00009",
+      "sim-s4-ac7-00010",
+      "sim-s4-ac22-00001",
+      "sim-s4-ac22-00002",
+      "sim-s4-ac22-00003",
+      "sim-s4-ac22-00004",
+      "sim-s4-ac22-00005",
+      "sim-s4-ac22-00006",
+      "sim-s4-ac22-00007",
+      "sim-s4-ac22-00008",
+      "sim-s4-ac22-00009",
+      "sim-s4-ac22-00010",
+      "sim-s4-dc60-00001",
+      "sim-s4-dc60-00002",
+      "sim-s4-dc60-00003",
+      "sim-s4-dc60-00004",
+      "sim-s4-dc60-00005",
+      "sim-s4-dc60-00006",
+      "sim-s4-dc60-00007",
+      "sim-s4-dc60-00008",
+      "sim-s4-dc60-00009",
+      "sim-s4-dc60-00010",
+      "sim-s4-dc60-00011",
+      "sim-s4-dc60-00012",
+      "sim-s4-dc60-00013",
+      "sim-s4-dc60-00014",
+      "sim-s4-dc60-00015",
+      "sim-s4-dc60-00016",
+      "sim-s4-dc60-00017",
+      "sim-s4-dc60-00018",
+      "sim-s4-dc60-00019",
+      "sim-s4-dc60-00020",
+      "sim-s4-dc120-00001",
+      "sim-s4-dc120-00002",
+      "sim-s4-dc120-00003",
+      "sim-s4-dc120-00004",
+      "sim-s4-dc120-00005",
+      "sim-s4-dc120-00006",
+      "sim-s4-dc120-00007",
+      "sim-s4-dc120-00008",
+      "sim-s4-dc120-00009",
+      "sim-s4-dc120-00010"
+    ],
+    "max_parallel": 200,
+    "max_wait_seconds": 900,
+    "queue_policy": "fifo",
+    "on_full": "queue",
+    "behaviors": {
+      "NORMAL_CHARGING": 100
+    },
+    "site_weights": {
+      "site-1": 25,
+      "site-2": 25,
+      "site-3": 25,
+      "site-4": 25
+    },
+    "charging_type_weights": {
+      "AC": 40,
+      "DC": 60
+    },
+    "customer_profiles": {
+      "FLEET": {
+        "battery_wh": 60000,
+        "initial_soc": [
+          15,
+          35
+        ],
+        "target_soc": [
+          80,
+          95
+        ],
+        "charging_type_weights": {
+          "DC": 100
+        }
+      },
+      "TAXI": {
+        "battery_wh": 50000,
+        "initial_soc": [
+          10,
+          30
+        ],
+        "target_soc": [
+          70,
+          90
+        ],
+        "charging_type_weights": {
+          "DC": 100
+        }
+      },
+      "COMMUTER": {
+        "battery_wh": 60000,
+        "initial_soc": [
+          30,
+          60
+        ],
+        "target_soc": [
+          80,
+          90
+        ],
+        "charging_type_weights": {
+          "AC": 100
+        }
+      },
+      "PRIVATE": {
+        "battery_wh": 77000,
+        "initial_soc": [
+          20,
+          50
+        ],
+        "target_soc": [
+          80,
+          100
+        ],
+        "charging_type_weights": {
+          "AC": 50,
+          "DC": 50
+        }
+      },
+      "LONG_TRIP": {
+        "battery_wh": 90000,
+        "initial_soc": [
+          5,
+          20
+        ],
+        "target_soc": [
+          70,
+          90
+        ],
+        "charging_type_weights": {
+          "DC": 100
+        }
+      },
+      "OVERNIGHT": {
+        "battery_wh": 60000,
+        "initial_soc": [
+          20,
+          60
+        ],
+        "target_soc": [
+          90,
+          100
+        ],
+        "charging_type_weights": {
+          "AC": 100
+        }
+      }
+    },
+    "customer_weights_by_time": {
+      "14:51": {
+        "FLEET": 33,
+        "TAXI": 22,
+        "COMMUTER": 15,
+        "PRIVATE": 27,
+        "LONG_TRIP": 3,
+        "OVERNIGHT": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "native-smoke-1795750080000",
+  "name": "EVerest AC and OpenEMS commissioning",
+  "enabled": true,
+  "kind": "native_dispatch",
+  "schedule": {
+    "type": "daily",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "times": [
+      "10:28"
+    ],
+    "catch_up_seconds": 120
+  },
+  "parameters": {
+    "actions": [
+      {
+        "id": "ac",
+        "target": "everest-1",
+        "transport": "mqtt",
+        "command": "execute_charging_session",
+        "payload": "sleep 1;iec_wait_pwr_ready;sleep 1;draw_power_regulated 16,3;sleep 30;unplug",
+        "offset_seconds": 0
+      },
+      {
+        "id": "power",
+        "target": "factory-load",
+        "transport": "http",
+        "command": "set_power_w",
+        "payload": {
+          "value": 120000
+        },
+        "offset_seconds": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+import {execFileSync} from 'node:child_process';
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+const root = fileURLToPath(new URL('../.runtime/', import.meta.url));
+mkdirSync(root, {recursive: true, mode: 0o700});
+const docker = (...args) => execFileSync('docker', args, {encoding: 'utf8', maxBuffer: 8 * 1024 * 1024});
+const flows = JSON.parse(docker('compose', 'exec', '-T', 'everest-nodered', 'wget', '-qO-', '--header=Node-RED-API-Version: v2', 'http://127.0.0.1:1880/flows'));
+writeFileSync(root + 'flows.before.json', JSON.stringify(flows, null, 2), {mode: 0o600});
+console.log(JSON.stringify(flows.flows.filter(n => ['tab','mqtt-broker','mqtt in','mqtt out'].includes(n.type)), null, 2));
+const inspect = JSON.parse(docker('inspect', 'energy-lab-everest-nodered-1', 'energy-lab-openems-edge-1'));
+console.log(JSON.stringify(inspect.map(c => ({name:c.Name, mounts:c.Mounts, networks:Object.keys(c.NetworkSettings.Networks)})), null, 2));

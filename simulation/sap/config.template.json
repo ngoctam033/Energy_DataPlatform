@@ -1,0 +1,109 @@
+{
+  "supervisionUrls": [
+    "ws://citrine:8081"
+  ],
+  "supervisionUrlDistribution": "charging-station-affinity",
+  "log": {
+    "file": "/dev/stdout",
+    "errorFile": "/dev/stderr",
+    "console": false,
+    "rotate": false
+  },
+  "worker": {
+    "processType": "workerSet",
+    "elementsPerWorker": 50,
+    "poolMinSize": 1,
+    "poolMaxSize": 4
+  },
+  "uiServer": {
+    "enabled": true,
+    "type": "http",
+    "options": {
+      "host": "0.0.0.0",
+      "port": 8080
+    },
+    "accessPolicy": {
+      "allowedHosts": [
+        "localhost",
+        "127.0.0.1",
+        "sap-charging-simulator"
+      ],
+      "allowedOrigins": [],
+      "allowLoopbackProxy": false,
+      "requireTlsForNonLoopback": false,
+      "trustedProxies": []
+    },
+    "authentication": {
+      "enabled": true,
+      "type": "basic-auth",
+      "username": "simulation",
+      "password": "REPLACED_BY_PREPARE"
+    }
+  },
+  "stationTemplateUrls": [
+    {
+      "file": "SIM-S1-AC7.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S1-AC22.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S1-DC60.station-template.json",
+      "numberOfStations": 20
+    },
+    {
+      "file": "SIM-S1-DC120.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S2-AC7.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S2-AC22.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S2-DC60.station-template.json",
+      "numberOfStations": 20
+    },
+    {
+      "file": "SIM-S2-DC120.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S3-AC7.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S3-AC22.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S3-DC60.station-template.json",
+      "numberOfStations": 20
+    },
+    {
+      "file": "SIM-S3-DC120.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S4-AC7.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S4-AC22.station-template.json",
+      "numberOfStations": 10
+    },
+    {
+      "file": "SIM-S4-DC60.station-template.json",
+      "numberOfStations": 20
+    },
+    {
+      "file": "SIM-S4-DC120.station-template.json",
+      "numberOfStations": 10
+    }
+  ]
+}

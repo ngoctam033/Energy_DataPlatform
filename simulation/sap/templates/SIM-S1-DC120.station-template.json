@@ -1,0 +1,103 @@
+{
+  "$schemaVersion": 2,
+  "baseName": "SIM-S1-DC120",
+  "chargePointVendor": "Energy Lab",
+  "chargePointModel": "dc120",
+  "power": 120000,
+  "powerUnit": "W",
+  "currentOutType": "DC",
+  "numberOfPhases": 0,
+  "voltageOut": 400,
+  "powerSharedByConnectors": false,
+  "numberOfConnectors": 1,
+  "randomConnectors": false,
+  "ocppVersion": "1.6",
+  "ocppStrictCompliance": true,
+  "autoRegister": false,
+  "coherentMeterValues": true,
+  "evProfilesFile": "simulation-vehicles.json",
+  "postTransactionDelay": 10,
+  "beginEndMeterValues": true,
+  "transactionDataMeterValues": true,
+  "meteringPerTransaction": false,
+  "persistentConfiguration": false,
+  "AutomaticTransactionGenerator": {
+    "enable": false,
+    "minDuration": 60,
+    "maxDuration": 180,
+    "minDelayBetweenTwoTransactions": 10,
+    "maxDelayBetweenTwoTransactions": 30,
+    "probabilityOfStart": 0,
+    "stopAfterHours": 24
+  },
+  "Configuration": {
+    "configurationKey": [
+      {
+        "key": "MeterValuesSampledData",
+        "readonly": false,
+        "value": "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage,SoC"
+      },
+      {
+        "key": "MeterValueSampleInterval",
+        "readonly": false,
+        "value": "15"
+      },
+      {
+        "key": "HeartbeatInterval",
+        "readonly": false,
+        "value": "60"
+      },
+      {
+        "key": "WebSocketPingInterval",
+        "readonly": false,
+        "value": "30"
+      },
+      {
+        "key": "SupportedFeatureProfiles",
+        "readonly": true,
+        "value": "Core,SmartCharging,RemoteTrigger"
+      },
+      {
+        "key": "LocalAuthListEnabled",
+        "readonly": false,
+        "value": "false"
+      }
+    ]
+  },
+  "Connectors": {
+    "0": {},
+    "1": {
+      "bootStatus": "Available",
+      "maximumPower": 120000,
+      "MeterValues": [
+        {
+          "measurand": "Energy.Active.Import.Register",
+          "unit": "Wh",
+          "context": "Sample.Periodic"
+        },
+        {
+          "measurand": "Power.Active.Import",
+          "unit": "W",
+          "context": "Sample.Periodic"
+        },
+        {
+          "measurand": "Current.Import",
+          "unit": "A",
+          "context": "Sample.Periodic"
+        },
+        {
+          "measurand": "Voltage",
+          "unit": "V",
+          "context": "Sample.Periodic"
+        },
+        {
+          "measurand": "SoC",
+          "unit": "Percent",
+          "location": "EV",
+          "context": "Sample.Periodic"
+        }
+      ]
+    }
+  },
+  "firmwareVersion": "1.0.1"
+}

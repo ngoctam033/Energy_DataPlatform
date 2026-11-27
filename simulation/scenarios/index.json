@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "files": [
+    "daily/normal_working_day.json",
+    "energy/peak_load.json",
+    "smoke.json",
+    "daily/weekend.json",
+    "daily/fleet_charging.json",
+    "daily/holiday_travel.json",
+    "daily/low_demand.json",
+    "daily/demand_surge.json"
+  ]
+}

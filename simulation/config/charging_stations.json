@@ -1,0 +1,1633 @@
+{
+  "schema_version": 1,
+  "targets": {
+    "sim-s1-ac7-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00001",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00002",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00003",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00004",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00005",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00006",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00007",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00008",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00009",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac7-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC7-00010",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s1-ac22-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00001",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00002",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00003",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00004",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00005",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00006",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00007",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00008",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00009",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-ac22-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-AC22-00010",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s1-dc60-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00001",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00002",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00003",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00004",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00005",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00006",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00007",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00008",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00009",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00010",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00011": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00011",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00012": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00012",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00013": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00013",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00014": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00014",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00015": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00015",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00016": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00016",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00017": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00017",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00018": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00018",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00019": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00019",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc60-00020": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC60-00020",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s1-dc120-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00001",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00002",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00003",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00004",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00005",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00006",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00007",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00008",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00009",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s1-dc120-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S1-DC120-00010",
+      "site": "site-1",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-ac7-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00001",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00002",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00003",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00004",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00005",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00006",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00007",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00008",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00009",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac7-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC7-00010",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s2-ac22-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00001",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00002",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00003",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00004",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00005",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00006",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00007",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00008",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00009",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-ac22-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-AC22-00010",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s2-dc60-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00001",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00002",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00003",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00004",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00005",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00006",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00007",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00008",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00009",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00010",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00011": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00011",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00012": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00012",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00013": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00013",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00014": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00014",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00015": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00015",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00016": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00016",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00017": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00017",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00018": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00018",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00019": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00019",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc60-00020": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC60-00020",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s2-dc120-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00001",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00002",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00003",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00004",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00005",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00006",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00007",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00008",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00009",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s2-dc120-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S2-DC120-00010",
+      "site": "site-2",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-ac7-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00001",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00002",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00003",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00004",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00005",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00006",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00007",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00008",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00009",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac7-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC7-00010",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s3-ac22-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00001",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00002",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00003",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00004",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00005",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00006",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00007",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00008",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00009",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-ac22-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-AC22-00010",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s3-dc60-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00001",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00002",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00003",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00004",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00005",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00006",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00007",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00008",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00009",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00010",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00011": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00011",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00012": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00012",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00013": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00013",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00014": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00014",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00015": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00015",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00016": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00016",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00017": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00017",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00018": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00018",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00019": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00019",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc60-00020": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC60-00020",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s3-dc120-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00001",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00002",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00003",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00004",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00005",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00006",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00007",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00008",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00009",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s3-dc120-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S3-DC120-00010",
+      "site": "site-3",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-ac7-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00001",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00002",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00003",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00004",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00005",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00006",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00007",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00008",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00009",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac7-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC7-00010",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 7000
+    },
+    "sim-s4-ac22-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00001",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00002",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00003",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00004",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00005",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00006",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00007",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00008",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00009",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-ac22-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-AC22-00010",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 22000
+    },
+    "sim-s4-dc60-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00001",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00002",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00003",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00004",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00005",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00006",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00007",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00008",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00009",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00010",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00011": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00011",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00012": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00012",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00013": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00013",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00014": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00014",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00015": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00015",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00016": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00016",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00017": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00017",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00018": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00018",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00019": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00019",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc60-00020": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC60-00020",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 60000
+    },
+    "sim-s4-dc120-00001": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00001",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00002": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00002",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00003": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00003",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00004": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00004",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00005": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00005",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00006": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00006",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00007": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00007",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00008": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00008",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00009": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00009",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "sim-s4-dc120-00010": {
+      "type": "sap_evse",
+      "station_id": "SIM-S4-DC120-00010",
+      "site": "site-4",
+      "connector_id": 1,
+      "charging_type": "DC",
+      "max_power_w": 120000
+    },
+    "everest-1": {
+      "type": "everest_evse",
+      "station_id": "cp001",
+      "site": "bench",
+      "connector_id": 1,
+      "evse_id": 1,
+      "charging_type": "AC",
+      "max_power_w": 11040,
+      "mqtt_topic_base": "everest_external/nodered/1/carsim/cmd"
+    },
+    "everest-2": {
+      "type": "everest_evse",
+      "station_id": "cp001",
+      "site": "bench",
+      "connector_id": 2,
+      "evse_id": 2,
+      "charging_type": "AC",
+      "max_power_w": 11040,
+      "mqtt_topic_base": "everest_external/nodered/2/carsim/cmd"
+    },
+    "factory-load": {
+      "type": "openems_channel",
+      "site": "factory",
+      "component": "simulateConsumption",
+      "meter": "meterSimulation",
+      "value_min_w": 0,
+      "value_max_w": 200000
+    }
+  }
+}

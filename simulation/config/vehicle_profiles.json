@@ -1,0 +1,136 @@
+{
+  "profiles": [
+    {
+      "id": "FLEET",
+      "weight": 25,
+      "batteryCapacityWh": 60000,
+      "maxPowerW": 120000,
+      "initialSocPercentMin": 15,
+      "initialSocPercentMax": 35,
+      "chargingCurve": [
+        {
+          "socPercent": 0,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 75,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 100,
+          "powerFraction": 0.05
+        }
+      ]
+    },
+    {
+      "id": "TAXI",
+      "weight": 15,
+      "batteryCapacityWh": 50000,
+      "maxPowerW": 120000,
+      "initialSocPercentMin": 10,
+      "initialSocPercentMax": 30,
+      "chargingCurve": [
+        {
+          "socPercent": 0,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 75,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 100,
+          "powerFraction": 0.05
+        }
+      ]
+    },
+    {
+      "id": "COMMUTER",
+      "weight": 25,
+      "batteryCapacityWh": 60000,
+      "maxPowerW": 22000,
+      "initialSocPercentMin": 30,
+      "initialSocPercentMax": 60,
+      "chargingCurve": [
+        {
+          "socPercent": 0,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 75,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 100,
+          "powerFraction": 0.05
+        }
+      ]
+    },
+    {
+      "id": "PRIVATE",
+      "weight": 20,
+      "batteryCapacityWh": 77000,
+      "maxPowerW": 120000,
+      "initialSocPercentMin": 20,
+      "initialSocPercentMax": 50,
+      "chargingCurve": [
+        {
+          "socPercent": 0,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 75,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 100,
+          "powerFraction": 0.05
+        }
+      ]
+    },
+    {
+      "id": "LONG_TRIP",
+      "weight": 10,
+      "batteryCapacityWh": 90000,
+      "maxPowerW": 120000,
+      "initialSocPercentMin": 5,
+      "initialSocPercentMax": 20,
+      "chargingCurve": [
+        {
+          "socPercent": 0,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 75,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 100,
+          "powerFraction": 0.05
+        }
+      ]
+    },
+    {
+      "id": "OVERNIGHT",
+      "weight": 5,
+      "batteryCapacityWh": 60000,
+      "maxPowerW": 22000,
+      "initialSocPercentMin": 20,
+      "initialSocPercentMax": 60,
+      "chargingCurve": [
+        {
+          "socPercent": 0,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 75,
+          "powerFraction": 1
+        },
+        {
+          "socPercent": 100,
+          "powerFraction": 0.05
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "energy-lab-simulation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/engine.test.mjs && node tests/runtime.test.mjs",
+    "build": "node scripts/build-flows.mjs",
+    "validate": "node scripts/manage.mjs validate"
+  }
+}
